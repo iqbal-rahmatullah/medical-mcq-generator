@@ -14,6 +14,7 @@ from app.retrieval.medcpt_runtime import MedCPTRuntime
 from app.retrieval.retriever import Retriever
 from app.schemas.request import GenerateRequestItem
 from app.schemas.response import Meta, Options, QuestionItem, QuestionStatus
+from app.verification.gate import ReviewerClient, verify_questions
 
 LOGGER = logging.getLogger(__name__)
 
@@ -63,6 +64,16 @@ def _get_llm_client() -> LLMClient:
     if _LLM_CLIENT is None:
         _LLM_CLIENT = LLMClient()
     return _LLM_CLIENT
+
+
+def _get_reviewer_client() -> Optional[ReviewerClient]:
+    if not settings.LLM_API_KEY or not settings.LLM_MODEL:
+        return None
+    return ReviewerClient(
+        api_key=settings.LLM_API_KEY,
+        model=settings.LLM_MODEL,
+        timeout_sec=settings.LLM_TIMEOUT_SEC,
+    )
 
 
 def _load_corpus() -> DocumentStore:
@@ -134,6 +145,7 @@ def run_pipeline_batch(payload: List[GenerateRequestItem]) -> List[QuestionItem]
     results: List[QuestionItem] = []
     retriever = _get_retriever()
     llm_client = _get_llm_client()
+    reviewer_client = _get_reviewer_client()
 
     for item in payload:
         try:
@@ -168,13 +180,21 @@ def run_pipeline_batch(payload: List[GenerateRequestItem]) -> List[QuestionItem]
             )
             llm_ms = (time.perf_counter() - llm_start) * 1000.0
 
-            for question in questions:
+            verification_results = verify_questions(
+                questions,
+                retrieval_result.evidence_docs,
+                reviewer=reviewer_client,
+                run_reviewer=True,
+            )
+
+            for result in verification_results:
+                question = result.question
                 question.meta.retrieval.setdefault("doc_ids", retrieval_result.doc_ids)
                 question.meta.retrieval.setdefault("retrieval_mode", settings.RETRIEVAL_MODE)
                 question.meta.timings_ms.setdefault("retrieval", retrieval_ms)
                 question.meta.timings_ms.setdefault("llm", llm_ms)
 
-            results.extend(questions)
+            results.extend(result.question for result in verification_results)
         except ValueError as exc:
             results.extend(build_failure_batch([item], str(exc), status="FAILED_VERIFICATION"))
         except Exception as exc:
