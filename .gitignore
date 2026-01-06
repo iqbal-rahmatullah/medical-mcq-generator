@@ -1,5 +1,6 @@
 # Python
 __pycache__/
+**/__pycache__/
 *.py[cod]
 *.pyo
 *.pyd
@@ -14,6 +15,7 @@ ENV/
 build/
 dist/
 *.egg-info/
+aqg_medis.egg-info/
 
 # Test/coverage
 .pytest_cache/
