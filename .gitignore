@@ -9,7 +9,10 @@ __pycache__/
 .venv/
 venv/
 ENV/
+.env
 .env/
+.env.*
+!.env.example
 
 # Packaging/build
 build/
