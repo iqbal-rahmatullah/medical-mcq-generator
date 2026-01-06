@@ -8,6 +8,8 @@ class Settings(BaseSettings):
     BM25_CANDIDATES_TOP_N: int = 200
     RERANK_TOP_N: int = 50
     EVIDENCE_TOP_K: int = 20
+    FUSION_ENABLED: bool = False
+    RRF_K: int = 60
 
 
 settings = Settings()

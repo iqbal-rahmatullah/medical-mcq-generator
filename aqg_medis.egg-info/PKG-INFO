@@ -1,9 +1,0 @@
-Metadata-Version: 2.4
-Name: aqg-medis
-Version: 0.1.0
-Summary: Kerangka FastAPI untuk sistem AQG medis
-Requires-Python: >=3.10
-Description-Content-Type: text/markdown
-Requires-Dist: fastapi>=0.110
-Requires-Dist: pydantic-settings>=2.2
-Requires-Dist: uvicorn>=0.27
