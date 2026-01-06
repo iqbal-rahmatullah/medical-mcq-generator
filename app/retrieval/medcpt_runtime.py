@@ -12,7 +12,7 @@ from app.corpus.models import Document
 LOGGER = logging.getLogger(__name__)
 
 DEFAULT_QUERY_MODEL = "ncbi/MedCPT-Query-Encoder"
-DEFAULT_DOC_MODEL = "ncbi/MedCPT-Document-Encoder"
+DEFAULT_DOC_MODEL = "ncbi/MedCPT-Article-Encoder"
 
 
 def _select_device(preferred: str | None = None) -> torch.device:
