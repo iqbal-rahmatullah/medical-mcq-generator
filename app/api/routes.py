@@ -4,6 +4,7 @@ from typing import List
 
 from fastapi import APIRouter
 
+from app.logging.logger import get_latest_run_summary
 from app.schemas.request import GenerateRequestItem
 from app.schemas.response import HealthResponse, QuestionItem
 from app.services.pipeline import build_failure_batch, run_pipeline_batch
@@ -26,3 +27,11 @@ def generate_questions(payload: List[GenerateRequestItem]) -> List[QuestionItem]
         return run_pipeline_batch(payload)
     except Exception as exc:
         return build_failure_batch(payload, f"unhandled_error: {exc}")
+
+
+@router.get("/runs/latest")
+def latest_run() -> dict:
+    summary = get_latest_run_summary()
+    if summary is None:
+        return {"status": "empty"}
+    return summary

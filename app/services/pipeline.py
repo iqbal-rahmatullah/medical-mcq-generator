@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import hashlib
 import logging
 import re
 import time
+import uuid
+from datetime import datetime
 from typing import Dict, List, Optional
 
 from app.core.config import settings
@@ -10,12 +13,14 @@ from app.corpus.loaders import load_pubmed_hf, load_textbooks_hf
 from app.corpus.store import DocumentStore
 from app.generation.evidence_format import render_evidence
 from app.generation.llm_client import LLMClient
+from app.generation.prompt_templates import build_prompt
 from app.retrieval.bm25 import BM25Index
 from app.retrieval.medcpt_runtime import MedCPTRuntime
 from app.retrieval.query_builder import build_query
 from app.retrieval.retriever import Retriever
 from app.schemas.request import GenerateRequestItem
 from app.schemas.response import Meta, Options, QuestionItem, QuestionStatus
+from app.logging.logger import log_run
 from app.verification.gate import ReviewerClient, VerificationResult, verify_questions
 
 LOGGER = logging.getLogger(__name__)
@@ -183,6 +188,11 @@ def run_pipeline_batch(payload: List[GenerateRequestItem]) -> List[QuestionItem]
     retriever = _get_retriever()
     llm_client = _get_llm_client()
     reviewer_client = _get_reviewer_client()
+    run_started = time.perf_counter()
+    run_id = uuid.uuid4().hex
+    run_timestamp = datetime.utcnow().isoformat() + "Z"
+    run_log_items: List[Dict[str, object]] = []
+    input_batch = [item.model_dump() for item in payload]
 
     for item in payload:
         try:
@@ -194,6 +204,7 @@ def run_pipeline_batch(payload: List[GenerateRequestItem]) -> List[QuestionItem]
                 continue
 
             attempt_history: List[Dict[str, object]] = []
+            attempt_logs: List[Dict[str, object]] = []
             final_questions: Optional[List[QuestionItem]] = None
             initial_top_k = max(settings.EVIDENCE_TOP_K, 0)
             expanded_top_k = max(settings.EVIDENCE_TOP_K_EXPANDED, 0)
@@ -216,6 +227,27 @@ def run_pipeline_batch(payload: List[GenerateRequestItem]) -> List[QuestionItem]
                 retrieval_ms = (time.perf_counter() - retrieval_start) * 1000.0
 
                 if not retrieval_result.evidence_docs:
+                    attempt_logs.append(
+                        {
+                            "attempt": attempt,
+                            "reason": attempt_reason,
+                            "query": query_used,
+                            "evidence_top_k": evidence_top_k,
+                            "prompt_hash": "",
+                            "evidence_doc_ids": {
+                                "bm25": retrieval_result.bm25_doc_ids,
+                                "dense": retrieval_result.dense_doc_ids,
+                                "fused": retrieval_result.fused_doc_ids,
+                            },
+                            "runtime_ms": {
+                                "retrieval": retrieval_ms,
+                                "llm": 0.0,
+                                "verification": 0.0,
+                            },
+                            "status_counts": {"INSUFFICIENT_EVIDENCE": item.n_questions},
+                            "failed_checks": ["insufficient_evidence"],
+                        }
+                    )
                     attempt_history.append(
                         {
                             "attempt": attempt,
@@ -241,9 +273,19 @@ def run_pipeline_batch(payload: List[GenerateRequestItem]) -> List[QuestionItem]
                     for question in final_questions:
                         question.meta.retrieval.setdefault("retrieval_mode", settings.RETRIEVAL_MODE)
                         question.meta.timings_ms.setdefault("retrieval", retrieval_ms)
+                        question.meta.timings_ms.setdefault("llm", 0.0)
+                        question.meta.timings_ms.setdefault("verification", 0.0)
                     break
 
                 evidence_text = render_evidence(retrieval_result.evidence_docs)
+                prompt = build_prompt(
+                    item.topic,
+                    item.competency,
+                    evidence_text,
+                    item.n_questions,
+                    extra_instructions=extra_instructions,
+                )
+                prompt_hash = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
                 llm_start = time.perf_counter()
                 questions = llm_client.generate_mcq(
                     item.topic,
@@ -254,12 +296,14 @@ def run_pipeline_batch(payload: List[GenerateRequestItem]) -> List[QuestionItem]
                 )
                 llm_ms = (time.perf_counter() - llm_start) * 1000.0
 
+                verification_start = time.perf_counter()
                 verification_results = verify_questions(
                     questions,
                     retrieval_result.evidence_docs,
                     reviewer=reviewer_client,
                     run_reviewer=True,
                 )
+                verification_ms = (time.perf_counter() - verification_start) * 1000.0
 
                 for result in verification_results:
                     question = result.question
@@ -267,9 +311,31 @@ def run_pipeline_batch(payload: List[GenerateRequestItem]) -> List[QuestionItem]
                     question.meta.retrieval.setdefault("retrieval_mode", settings.RETRIEVAL_MODE)
                     question.meta.timings_ms.setdefault("retrieval", retrieval_ms)
                     question.meta.timings_ms.setdefault("llm", llm_ms)
+                    question.meta.timings_ms.setdefault("verification", verification_ms)
 
                 status_counts, failed_checks = _summarize_verification_results(
                     verification_results
+                )
+                attempt_logs.append(
+                    {
+                        "attempt": attempt,
+                        "reason": attempt_reason,
+                        "query": query_used,
+                        "evidence_top_k": evidence_top_k,
+                        "prompt_hash": prompt_hash,
+                        "evidence_doc_ids": {
+                            "bm25": retrieval_result.bm25_doc_ids,
+                            "dense": retrieval_result.dense_doc_ids,
+                            "fused": retrieval_result.fused_doc_ids,
+                        },
+                        "runtime_ms": {
+                            "retrieval": retrieval_ms,
+                            "llm": llm_ms,
+                            "verification": verification_ms,
+                        },
+                        "status_counts": status_counts,
+                        "failed_checks": failed_checks,
+                    }
                 )
                 attempt_history.append(
                     {
@@ -279,6 +345,7 @@ def run_pipeline_batch(payload: List[GenerateRequestItem]) -> List[QuestionItem]
                         "evidence_top_k": evidence_top_k,
                         "retrieval_ms": retrieval_ms,
                         "llm_ms": llm_ms,
+                        "verification_ms": verification_ms,
                         "extra_instructions": extra_instructions or "",
                         "status_counts": status_counts,
                         "failed_checks": failed_checks,
@@ -319,11 +386,55 @@ def run_pipeline_batch(payload: List[GenerateRequestItem]) -> List[QuestionItem]
                 question.meta.verification = verification_meta
 
             results.extend(final_questions)
-        except ValueError as exc:
-            results.extend(build_failure_batch([item], str(exc), status="FAILED_VERIFICATION"))
-        except Exception as exc:
-            results.extend(
-                build_failure_batch([item], f"pipeline_error: {exc}", status="FAILED_VERIFICATION")
+            run_log_items.append(
+                {
+                    "input": item.model_dump(),
+                    "attempts": attempt_logs,
+                    "outputs": [question.model_dump() for question in final_questions],
+                    "verification_reports": [
+                        question.meta.verification.get("gate") for question in final_questions
+                    ],
+                }
             )
+        except ValueError as exc:
+            failure_questions = build_failure_batch([item], str(exc), status="FAILED_VERIFICATION")
+            results.extend(failure_questions)
+            run_log_items.append(
+                {
+                    "input": item.model_dump(),
+                    "attempts": [],
+                    "outputs": [question.model_dump() for question in failure_questions],
+                    "verification_reports": [
+                        question.meta.verification.get("gate") for question in failure_questions
+                    ],
+                }
+            )
+        except Exception as exc:
+            failure_questions = build_failure_batch(
+                [item], f"pipeline_error: {exc}", status="FAILED_VERIFICATION"
+            )
+            results.extend(failure_questions)
+            run_log_items.append(
+                {
+                    "input": item.model_dump(),
+                    "attempts": [],
+                    "outputs": [question.model_dump() for question in failure_questions],
+                    "verification_reports": [
+                        question.meta.verification.get("gate") for question in failure_questions
+                    ],
+                }
+            )
+
+    run_record = {
+        "run_id": run_id,
+        "timestamp": run_timestamp,
+        "input_batch": input_batch,
+        "items": run_log_items,
+        "runtime_ms": (time.perf_counter() - run_started) * 1000.0,
+    }
+    try:
+        log_run(run_record)
+    except Exception as exc:
+        LOGGER.warning("Failed to log run: %s", exc)
 
     return results

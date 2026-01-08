@@ -17,6 +17,9 @@ LOGGER = logging.getLogger(__name__)
 class RetrievalResult:
     doc_ids: List[str]
     evidence_docs: List[Document]
+    bm25_doc_ids: List[str]
+    dense_doc_ids: List[str]
+    fused_doc_ids: List[str]
 
 
 def rrf_fuse(rank_a: List[str], rank_b: List[str], k_rrf: int = 60) -> List[str]:
@@ -126,4 +129,10 @@ class Retriever:
         evidence_ids = [doc.doc_id for doc in evidence_docs]
         LOGGER.debug("final evidence ids: %s", evidence_ids)
 
-        return RetrievalResult(doc_ids=final_ids, evidence_docs=evidence_docs)
+        return RetrievalResult(
+            doc_ids=final_ids,
+            evidence_docs=evidence_docs,
+            bm25_doc_ids=candidate_ids,
+            dense_doc_ids=reranked_ids,
+            fused_doc_ids=final_ids,
+        )
