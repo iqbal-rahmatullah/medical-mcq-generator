@@ -67,13 +67,16 @@ def _get_llm_client() -> LLMClient:
 
 
 def _get_reviewer_client() -> Optional[ReviewerClient]:
-    if not settings.LLM_API_KEY or not settings.LLM_MODEL:
+    provider = (settings.LLM_PROVIDER or "").strip().lower()
+    if provider in ("groq", "groq_sdk", "groq_cloud"):
+        if not (settings.GROQ_API_KEY or settings.LLM_API_KEY):
+            return None
+    elif provider in ("openai_compatible", "openai", "gemini_sdk", "gemini", "google_genai"):
+        if not settings.LLM_API_KEY:
+            return None
+    if not settings.LLM_MODEL:
         return None
-    return ReviewerClient(
-        api_key=settings.LLM_API_KEY,
-        model=settings.LLM_MODEL,
-        timeout_sec=settings.LLM_TIMEOUT_SEC,
-    )
+    return ReviewerClient(_get_llm_client())
 
 
 def _load_corpus() -> DocumentStore:

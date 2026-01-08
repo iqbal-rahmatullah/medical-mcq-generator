@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 
 from app.corpus.models import Document
 from app.generation.evidence_format import render_evidence
+from app.generation.llm_client import LLMClient
 from app.schemas.response import QuestionItem
 
 LOGGER = logging.getLogger(__name__)
@@ -23,37 +24,15 @@ class VerificationReport(BaseModel):
 
 
 class ReviewerClient:
-    def __init__(
-        self,
-        api_key: Optional[str],
-        model: str,
-        timeout_sec: float = 60.0,
-    ) -> None:
-        self._api_key = api_key
-        self._model = model
-        self._timeout_sec = timeout_sec
+    def __init__(self, llm_client: LLMClient) -> None:
+        self._llm_client = llm_client
 
     def review(self, question: QuestionItem, evidence_text: str) -> str:
-        try:
-            from google import genai
-        except Exception as exc:  # pragma: no cover - optional dependency
-            raise RuntimeError(f"google-genai not available: {exc}") from exc
-
         prompt = _build_review_prompt(question, evidence_text)
-        client = genai.Client(api_key=self._api_key)
-        response = client.models.generate_content(
-            model=self._model,
-            contents=prompt,
-            config={"temperature": 0.0},
-        )
-        text = getattr(response, "text", None)
-        if not text:
-            candidates = getattr(response, "candidates", None) or []
-            if candidates:
-                parts = getattr(candidates[0].content, "parts", None) or []
-                text = "".join(getattr(part, "text", "") for part in parts)
-
-        return _parse_reviewer_decision(text or "")
+        text = self._llm_client.generate_text(prompt)
+        if text is None:
+            raise RuntimeError("reviewer_empty_response")
+        return _parse_reviewer_decision(text)
 
 
 @dataclass
