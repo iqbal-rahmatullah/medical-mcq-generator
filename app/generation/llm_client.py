@@ -50,8 +50,15 @@ class LLMClient:
         competency: str,
         evidence_text: str,
         n_questions: int,
+        extra_instructions: Optional[str] = None,
     ) -> List[QuestionItem]:
-        prompt = build_prompt(topic, competency, evidence_text, n_questions)
+        prompt = build_prompt(
+            topic,
+            competency,
+            evidence_text,
+            n_questions,
+            extra_instructions=extra_instructions,
+        )
         content = self._chat_completion(prompt)
         if content is None:
             return self._fallback_items(topic, competency, n_questions, "empty_response")

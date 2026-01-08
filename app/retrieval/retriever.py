@@ -69,8 +69,15 @@ class Retriever:
         )
         self._rrf_k = rrf_k if rrf_k is not None else settings.RRF_K
 
-    def retrieve(self, topic: str, competency: str) -> RetrievalResult:
-        query = build_query(topic, competency)
+    def retrieve(
+        self,
+        topic: str,
+        competency: str,
+        *,
+        evidence_top_k: Optional[int] = None,
+        query_override: Optional[str] = None,
+    ) -> RetrievalResult:
+        query = (query_override or "").strip() or build_query(topic, competency)
         candidates_limit = max(self._bm25_candidates_top_n, 0)
         bm25_results = self._bm25_index.search(query, top_k=candidates_limit)
         candidate_docs = [doc for doc, _score in bm25_results]
@@ -111,7 +118,10 @@ class Retriever:
             final_ids = candidate_ids
 
         final_docs = [doc_lookup[doc_id] for doc_id in final_ids if doc_id in doc_lookup]
-        evidence_limit = max(self._evidence_top_k, 0)
+        evidence_limit = max(
+            self._evidence_top_k if evidence_top_k is None else evidence_top_k,
+            0,
+        )
         evidence_docs = final_docs[:evidence_limit]
         evidence_ids = [doc.doc_id for doc in evidence_docs]
         LOGGER.debug("final evidence ids: %s", evidence_ids)

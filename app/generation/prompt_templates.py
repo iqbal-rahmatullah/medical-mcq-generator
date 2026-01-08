@@ -45,10 +45,19 @@ Evidence:
 """
 
 
-def build_prompt(topic: str, competency: str, evidence_text: str, n_questions: int) -> str:
-    return PROMPT_TEMPLATE.format(
+def build_prompt(
+    topic: str,
+    competency: str,
+    evidence_text: str,
+    n_questions: int,
+    extra_instructions: str | None = None,
+) -> str:
+    prompt = PROMPT_TEMPLATE.format(
         topic=topic.strip(),
         competency=competency.strip(),
         evidence_text=evidence_text.strip(),
         n_questions=n_questions,
     ).strip()
+    if extra_instructions:
+        prompt = f"{prompt}\n\nAdditional instruction: {extra_instructions.strip()}"
+    return prompt

@@ -9,7 +9,8 @@ class Settings(BaseSettings):
     RETRIEVAL_MODE: str = "bm25_only"
     BM25_CANDIDATES_TOP_N: int = 200
     RERANK_TOP_N: int = 50
-    EVIDENCE_TOP_K: int = 5
+    EVIDENCE_TOP_K: int = 10
+    EVIDENCE_TOP_K_EXPANDED: int = 20
     FUSION_ENABLED: bool = False
     RRF_K: int = 60
     LLM_PROVIDER: str = "gemini_sdk"
