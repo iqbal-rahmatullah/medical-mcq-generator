@@ -1,14 +1,19 @@
+"use client"
+
+import { usePathname } from "next/navigation"
+
 import NavLink from "./NavLink"
 import IconButton from "./IconButton"
 import Avatar from "./Avatar"
 
-const navItems = [
-  { label: "Generate", href: "#", active: true },
-  { label: "History", href: "#", active: false },
-  { label: "Docs", href: "#", active: false },
-]
-
 export default function Navbar() {
+  const pathname = usePathname()
+  const navItems = [
+    { label: "Generate", href: "/" },
+    { label: "History", href: "/history" },
+    { label: "Docs", href: "/docs" },
+  ]
+
   return (
     <nav className='navbar'>
       <div className='navbar-inner'>
@@ -27,7 +32,7 @@ export default function Navbar() {
                 key={item.label}
                 href={item.href}
                 label={item.label}
-                active={item.active}
+                active={pathname === item.href}
               />
             ))}
           </div>
@@ -52,15 +57,6 @@ function LogoMark() {
         <path d='M24 12L36 24L24 36L12 24L24 12Z' />
       </svg>
     </div>
-  )
-}
-
-function BellIcon() {
-  return (
-    <svg viewBox='0 0 24 24' aria-hidden='true'>
-      <path d='M12 3a5 5 0 0 0-5 5v3.6c0 .9-.3 1.8-.9 2.5l-1.1 1.3h14l-1.1-1.3a3.6 3.6 0 0 1-.9-2.5V8a5 5 0 0 0-5-5Z' />
-      <path d='M9.8 19a2.2 2.2 0 0 0 4.4 0' />
-    </svg>
   )
 }
 

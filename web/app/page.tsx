@@ -1,4 +1,5 @@
 import FormField from "../components/FormField"
+import Footer from "../components/Footer"
 import Navbar from "../components/Navbar"
 import QuestionCard from "../components/QuestionCard"
 import SectionCard from "../components/SectionCard"
@@ -114,6 +115,7 @@ export default function HomePage() {
           </div>
         </div>
       </main>
+      <Footer />
     </div>
   )
 }
