@@ -8,12 +8,15 @@ type EvidenceBlock = {
   source: string;
 };
 
+type QuestionStatus = "OK" | "INSUFFICIENT_EVIDENCE" | "FAILED_VERIFICATION";
+
 type QuestionCardProps = {
   index: number;
   prompt: string;
   options: QuestionOption[];
   selectedKey?: QuestionOption["key"];
   evidence?: EvidenceBlock;
+  status?: QuestionStatus;
 };
 
 export default function QuestionCard({
@@ -21,13 +24,19 @@ export default function QuestionCard({
   prompt,
   options,
   selectedKey,
-  evidence
+  evidence,
+  status
 }: QuestionCardProps) {
+  const showStatus = status && status !== "OK";
+
   return (
     <article className="question-card">
       <header className="question-header">
         <span className="question-badge">Q{index}.</span>
-        <p className="question-text">{prompt}</p>
+        <p className="question-text">{prompt || "Question text unavailable."}</p>
+        {showStatus ? (
+          <span className={`status-chip ${status?.toLowerCase()}`}>{status}</span>
+        ) : null}
       </header>
 
       <ul className="option-list">
@@ -47,9 +56,7 @@ export default function QuestionCard({
       {evidence ? (
         <div className="evidence-card">
           <p className="evidence-title">{evidence.label}</p>
-          <p className="evidence-text">
-            {evidence.source}
-          </p>
+          <p className="evidence-text">{evidence.source}</p>
         </div>
       ) : null}
     </article>

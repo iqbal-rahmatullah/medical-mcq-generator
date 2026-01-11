@@ -253,6 +253,35 @@ p {
   gap: 14px;
 }
 
+.config-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.config-title {
+  margin: 0;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.remove-button {
+  border: none;
+  background: rgba(239, 68, 68, 0.1);
+  color: #b91c1c;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 6px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.remove-button:hover {
+  background: rgba(239, 68, 68, 0.18);
+}
+
 .form-field {
   display: flex;
   flex-direction: column;
@@ -308,6 +337,30 @@ p {
   cursor: pointer;
   box-shadow: 0 10px 22px rgba(29, 107, 255, 0.24);
   width: 100%;
+}
+
+.primary-button:disabled {
+  opacity: 0.7;
+  cursor: default;
+}
+
+.form-error {
+  color: #b91c1c;
+  font-size: 0.85rem;
+  font-weight: 600;
+  margin: 0;
+}
+
+.form-muted {
+  color: var(--muted);
+  font-size: 0.85rem;
+  margin: 0;
+}
+
+.config-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
 .form-footnote {
@@ -368,6 +421,48 @@ p {
   gap: 16px;
 }
 
+.empty-state {
+  border: 1px dashed var(--border);
+  border-radius: 14px;
+  padding: 24px;
+  background: #f9fbff;
+  color: var(--muted);
+  display: grid;
+  gap: 12px;
+  justify-items: center;
+  text-align: center;
+}
+
+.empty-icon {
+  width: 50px;
+  height: 50px;
+  border-radius: 12px;
+  background: rgba(29, 107, 255, 0.12);
+  display: grid;
+  place-items: center;
+}
+
+.empty-icon svg {
+  width: 26px;
+  height: 26px;
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.empty-title {
+  margin: 0;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.empty-desc {
+  margin: 6px 0 0;
+  font-size: 0.88rem;
+}
+
 .question-card {
   border: 1px solid var(--border);
   border-radius: 16px;
@@ -401,6 +496,29 @@ p {
   font-size: 0.98rem;
   line-height: 1.55;
   color: var(--ink);
+  flex: 1;
+}
+
+.status-chip {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(99, 112, 131, 0.12);
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.status-chip.insufficient_evidence {
+  background: rgba(234, 179, 8, 0.16);
+  color: #a16207;
+}
+
+.status-chip.failed_verification {
+  background: rgba(239, 68, 68, 0.16);
+  color: #b91c1c;
 }
 
 .option-list {

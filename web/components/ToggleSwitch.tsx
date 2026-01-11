@@ -1,14 +1,32 @@
-import type { ReactNode } from "react";
+import type { ChangeEvent, ReactNode } from "react";
 
 type ToggleSwitchProps = {
   label: ReactNode;
   defaultChecked?: boolean;
+  checked?: boolean;
+  onChange?: (checked: boolean) => void;
 };
 
-export default function ToggleSwitch({ label, defaultChecked }: ToggleSwitchProps) {
+export default function ToggleSwitch({
+  label,
+  defaultChecked,
+  checked,
+  onChange
+}: ToggleSwitchProps) {
+  const handleChange = (event: ChangeEvent<HTMLInputElement>) => {
+    if (onChange) {
+      onChange(event.target.checked);
+    }
+  };
+
+  const inputProps =
+    typeof checked === "boolean"
+      ? { checked, onChange: handleChange }
+      : { defaultChecked, onChange: handleChange };
+
   return (
     <label className="toggle">
-      <input type="checkbox" defaultChecked={defaultChecked} />
+      <input type="checkbox" {...inputProps} />
       <span className="toggle-track" aria-hidden="true">
         <span className="toggle-thumb" />
       </span>
