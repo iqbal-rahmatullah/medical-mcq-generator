@@ -1,16 +1,16 @@
-"use client"
+'use client'
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from 'react'
 
-import FormField from "../components/FormField"
-import Footer from "../components/Footer"
-import Navbar from "../components/Navbar"
-import QuestionCard from "../components/QuestionCard"
-import SectionCard from "../components/SectionCard"
-import ToggleSwitch from "../components/ToggleSwitch"
+import FormField from '../components/FormField'
+import Footer from '../components/Footer'
+import Navbar from '../components/Navbar'
+import QuestionCard from '../components/QuestionCard'
+import SectionCard from '../components/SectionCard'
+import ToggleSwitch from '../components/ToggleSwitch'
 
-type QuestionStatus = "OK" | "INSUFFICIENT_EVIDENCE" | "FAILED_VERIFICATION"
-type AnswerKey = "A" | "B" | "C" | "D"
+type QuestionStatus = 'OK' | 'INSUFFICIENT_EVIDENCE' | 'FAILED_VERIFICATION'
+type AnswerKey = 'A' | 'B' | 'C' | 'D'
 
 type EvidenceItem = {
   source: string
@@ -41,57 +41,94 @@ type TopicEntry = {
   n_questions: number
 }
 
-const competencyOptions = ["Diagnosis", "Therapy", "Prognosis"]
+type ProgressState = {
+  completed: number
+  total: number
+}
+
+type WsEvent =
+  | {
+      type: 'progress'
+      completed?: number
+      total_questions?: number
+    }
+  | {
+      type: 'question'
+      question: ApiQuestion
+    }
+  | {
+      type: 'done'
+    }
+  | {
+      type: 'error'
+      message?: string
+    }
+
+const competencyOptions = ['Diagnosis', 'Therapy', 'Prognosis']
+
+const API_BASE =
+  process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000'
+const WS_BASE =
+  process.env.NEXT_PUBLIC_WS_BASE_URL || API_BASE.replace(/^http/, 'ws')
 
 export default function HomePage() {
   const [topics, setTopics] = useState<TopicEntry[]>([
     {
-      id: "topic-1",
-      topic: "",
-      competency: "Diagnosis",
-      n_questions: 1,
+      id: 'topic-1',
+      topic: 'Cardiology',
+      competency: 'Diagnosis',
+      n_questions: 5,
     },
   ])
   const [results, setResults] = useState<ApiQuestion[]>([])
   const [loading, setLoading] = useState(false)
-  const [error, setError] = useState("")
+  const [error, setError] = useState('')
   const [showAnswers, setShowAnswers] = useState(true)
+  const [progress, setProgress] = useState<ProgressState | null>(null)
+  const socketRef = useRef<WebSocket | null>(null)
+  const runIdRef = useRef(0)
 
-  const questionsToRender = results
+  useEffect(() => {
+    return () => {
+      if (socketRef.current) {
+        socketRef.current.close()
+      }
+    }
+  }, [])
 
   const questionCards = useMemo(() => {
-    return questionsToRender.map((question, index) => {
+    return results.map((question, index) => {
       const options: Options = question.options || {
-        A: "-",
-        B: "-",
-        C: "-",
-        D: "-",
+        A: '-',
+        B: '-',
+        C: '-',
+        D: '-',
       }
       const evidenceText = (question.evidence || [])
         .map((item) => item.span_text)
         .filter(Boolean)
-        .join(" ")
+        .join(' ')
 
       return {
         index: index + 1,
-        prompt: question.stem || "Question text unavailable.",
+        prompt: question.stem || 'Question text unavailable.',
         options: [
-          { key: "A" as const, text: options.A || "-" },
-          { key: "B" as const, text: options.B || "-" },
-          { key: "C" as const, text: options.C || "-" },
-          { key: "D" as const, text: options.D || "-" },
+          { key: 'A' as const, text: options.A || '-' },
+          { key: 'B' as const, text: options.B || '-' },
+          { key: 'C' as const, text: options.C || '-' },
+          { key: 'D' as const, text: options.D || '-' },
         ],
         selectedKey: showAnswers ? question.answer_key : undefined,
         evidence: evidenceText
           ? {
-              label: "Source Evidence / RAG Context",
+              label: 'Source Evidence / RAG Context',
               source: evidenceText,
             }
           : undefined,
         status: question.status,
       }
     })
-  }, [questionsToRender, showAnswers])
+  }, [results, showAnswers])
 
   const handleTopicChange = (
     id: string,
@@ -110,8 +147,8 @@ export default function HomePage() {
       ...prev,
       {
         id: `topic-${Date.now()}`,
-        topic: "",
-        competency: "Diagnosis",
+        topic: '',
+        competency: 'Diagnosis',
         n_questions: 5,
       },
     ])
@@ -131,39 +168,86 @@ export default function HomePage() {
       .filter((item) => item.topic && item.competency)
   }
 
-  const handleGenerate = async () => {
-    setError("")
+  const handleGenerate = () => {
+    setError('')
+    setResults([])
+    setProgress(null)
     const payload = buildPayload()
 
     if (!payload.length) {
-      setError("Topik dan kompetensi wajib diisi.")
+      setError('Topik dan kompetensi wajib diisi.')
       return
     }
 
+    if (socketRef.current) {
+      socketRef.current.close()
+    }
+
+    runIdRef.current += 1
+    const currentRunId = runIdRef.current
+
+    const totalQuestions = payload.reduce(
+      (sum, item) => sum + Math.max(1, item.n_questions || 1),
+      0
+    )
+
     setLoading(true)
-    setResults([])
+    setProgress({ completed: 0, total: totalQuestions })
 
-    try {
-      const response = await fetch("/api/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      })
+    const socket = new WebSocket(`${WS_BASE}/ws/generate`)
+    socketRef.current = socket
 
-      if (!response.ok) {
-        const message = await response.text()
-        throw new Error(message || `API error ${response.status}`)
+    socket.onopen = () => {
+      socket.send(JSON.stringify(payload))
+    }
+
+    socket.onmessage = (event) => {
+      if (currentRunId !== runIdRef.current) {
+        return
+      }
+      let data: WsEvent
+      try {
+        data = JSON.parse(event.data) as WsEvent
+      } catch (parseError) {
+        setError('Invalid websocket message.')
+        setLoading(false)
+        return
       }
 
-      const data: unknown = await response.json()
-      if (!Array.isArray(data)) {
-        throw new Error("Format response tidak sesuai.")
+      if (data.type === 'question') {
+        setResults((prev) => [...prev, data.question])
       }
 
-      setResults(data as ApiQuestion[])
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Gagal memanggil API.")
-    } finally {
+      if (data.type === 'progress') {
+        setProgress((prev) => {
+          const total = data.total_questions ?? prev?.total ?? totalQuestions
+          const completed = data.completed ?? prev?.completed ?? 0
+          return { completed, total }
+        })
+      }
+
+      if (data.type === 'error') {
+        setError(data.message || 'Websocket error.')
+      }
+
+      if (data.type === 'done') {
+        setLoading(false)
+        socket.close()
+      }
+    }
+
+    socket.onerror = () => {
+      if (currentRunId !== runIdRef.current) {
+        return
+      }
+      setError('Websocket connection failed.')
+      setLoading(false)
+    }
+
+    socket.onclose = () => {
+      if (currentRunId !== runIdRef.current) {
+        return
+      }
       setLoading(false)
     }
   }
@@ -197,7 +281,7 @@ export default function HomePage() {
                         onChange={(event) =>
                           handleTopicChange(
                             topic.id,
-                            "topic",
+                            'topic',
                             event.target.value
                           )
                         }
@@ -211,7 +295,7 @@ export default function HomePage() {
                         onChange={(event) =>
                           handleTopicChange(
                             topic.id,
-                            "competency",
+                            'competency',
                             event.target.value
                           )
                         }
@@ -232,7 +316,7 @@ export default function HomePage() {
                         onChange={(event) =>
                           handleTopicChange(
                             topic.id,
-                            "n_questions",
+                            'n_questions',
                             Math.max(
                               1,
                               Number.parseInt(event.target.value, 10) || 1
@@ -245,11 +329,7 @@ export default function HomePage() {
                 ))}
               </div>
 
-              <button
-                type='button'
-                className='ghost-button'
-                onClick={handleAddTopic}
-              >
+              <button type='button' className='ghost-button' onClick={handleAddTopic}>
                 + Add Another Topic
               </button>
 
@@ -259,12 +339,14 @@ export default function HomePage() {
                 onClick={handleGenerate}
                 disabled={loading}
               >
-                {loading ? "Generating..." : "Generate Questions"}
+                {loading ? 'Generating...' : 'Generate Questions'}
               </button>
 
               {error ? <p className='form-error'>{error}</p> : null}
-              {loading ? (
-                <p className='form-muted'>Generating questions...</p>
+              {loading && progress ? (
+                <p className='form-muted'>
+                  Generating {progress.completed} of {progress.total} questions...
+                </p>
               ) : null}
             </SectionCard>
 
@@ -278,14 +360,21 @@ export default function HomePage() {
                 />
               }
             >
-              {loading ? (
+              {!results.length && loading ? (
                 <div className='empty-state'>
+                  <div className='empty-icon' aria-hidden='true'>
+                    <svg viewBox='0 0 48 48'>
+                      <circle cx='20' cy='22' r='8' />
+                      <path d='M26 28l7 7' />
+                      <rect x='9' y='10' width='30' height='28' rx='8' />
+                    </svg>
+                  </div>
                   <p className='empty-title'>Generating questions...</p>
                   <p className='empty-desc'>
-                    We are preparing the latest output.
+                    We are streaming results as they are ready.
                   </p>
                 </div>
-              ) : questionCards.length ? (
+              ) : results.length ? (
                 <div className='question-list'>
                   {questionCards.map((question) => (
                     <QuestionCard
