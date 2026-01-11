@@ -19,10 +19,6 @@ def health_check() -> HealthResponse:
 
 @router.post("/generate", response_model=List[QuestionItem])
 def generate_questions(payload: List[GenerateRequestItem]) -> List[QuestionItem]:
-    # Contoh curl:
-    # curl -X POST http://localhost:8000/generate \
-    #   -H "Content-Type: application/json" \
-    #   -d '[{"topic":"Diabetes","competency":"Diagnosis","n_questions":2}]'
     try:
         return run_pipeline_batch(payload)
     except Exception as exc:

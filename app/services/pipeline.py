@@ -171,13 +171,13 @@ def _get_retriever() -> Optional[Retriever]:
         if settings.RETRIEVAL_MODE == "hybrid_rerank":
             try:
                 medcpt_runtime = MedCPTRuntime()
-            except Exception as exc:  # pragma: no cover - defensive path
+            except Exception as exc:
                 LOGGER.exception("Failed to init MedCPT runtime: %s", exc)
                 medcpt_runtime = None
 
         _RETRIEVER = Retriever(index, medcpt_runtime=medcpt_runtime)
         return _RETRIEVER
-    except Exception as exc:  # pragma: no cover - defensive path
+    except Exception as exc:
         _RETRIEVER_ERROR = f"retriever_init_failed: {exc}"
         LOGGER.exception("Failed to init retriever: %s", exc)
         return None

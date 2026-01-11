@@ -40,3 +40,9 @@ htmlcov/
 
 # Run logs
 app/logging/*.jsonl
+
+# Next.js
+web/node_modules/
+web/.next/
+web/out/
+web/package-lock.json
