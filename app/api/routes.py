@@ -5,7 +5,7 @@ from typing import List
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from pydantic import TypeAdapter, ValidationError
 
-from app.logging.logger import get_latest_run_summary
+from app.logging.logger import get_latest_run_record, get_latest_run_summary
 from app.schemas.request import GenerateRequestItem
 from app.schemas.response import HealthResponse, QuestionItem
 from app.services.pipeline import build_failure_batch, run_pipeline_batch, run_pipeline_stream
@@ -64,6 +64,7 @@ async def generate_questions_ws(websocket: WebSocket) -> None:
 @router.get("/runs/latest")
 def latest_run() -> dict:
     summary = get_latest_run_summary()
-    if summary is None:
+    record = get_latest_run_record()
+    if summary is None and record is None:
         return {"status": "empty"}
-    return summary
+    return {"summary": summary, "record": record}

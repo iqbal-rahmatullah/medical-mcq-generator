@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import json
 import threading
 import time
@@ -9,6 +10,7 @@ from typing import Any, Dict, Optional
 _LOG_PATH = Path("app/logging/runs.jsonl")
 _LOCK = threading.Lock()
 _LATEST_RUN_SUMMARY: Optional[Dict[str, Any]] = None
+_LATEST_RUN_RECORD: Optional[Dict[str, Any]] = None
 
 
 def _build_summary(record: Dict[str, Any]) -> Dict[str, Any]:
@@ -46,8 +48,9 @@ def log_run(record: Dict[str, Any]) -> Dict[str, Any]:
 
     summary = _build_summary(record)
     with _LOCK:
-        global _LATEST_RUN_SUMMARY
+        global _LATEST_RUN_SUMMARY, _LATEST_RUN_RECORD
         _LATEST_RUN_SUMMARY = summary
+        _LATEST_RUN_RECORD = copy.deepcopy(record)
 
     return summary
 
@@ -57,3 +60,10 @@ def get_latest_run_summary() -> Optional[Dict[str, Any]]:
         if _LATEST_RUN_SUMMARY is None:
             return None
         return dict(_LATEST_RUN_SUMMARY)
+
+
+def get_latest_run_record() -> Optional[Dict[str, Any]]:
+    with _LOCK:
+        if _LATEST_RUN_RECORD is None:
+            return None
+        return copy.deepcopy(_LATEST_RUN_RECORD)
