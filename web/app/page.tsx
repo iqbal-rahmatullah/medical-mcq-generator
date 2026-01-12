@@ -64,7 +64,20 @@ type WsEvent =
       message?: string
     }
 
-const competencyOptions = ['Diagnosis', 'Therapy', 'Prognosis']
+const competencyOptions = [
+  'Diagnosis',
+  'Treatment',
+  'Therapy',
+  'Etiology',
+  'Prevention',
+  'Prognosis',
+  'Screening',
+  'Complications',
+  'Pathophysiology',
+  'Pharmacology',
+  'Monitoring',
+  'Investigation',
+]
 
 const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000'
