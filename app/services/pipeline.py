@@ -28,8 +28,20 @@ LOGGER = logging.getLogger(__name__)
 _RETRIEVER: Optional[Retriever] = None
 _RETRIEVER_ERROR: Optional[str] = None
 _LLM_CLIENT: Optional[LLMClient] = None
-_MAX_ATTEMPTS = 2
+_MAX_ATTEMPTS = max(settings.LLM_MAX_ATTEMPTS, 1)
 _REQUOTE_INSTRUCTION = "re-quote exact evidence span"
+_STRICT_JSON_INSTRUCTION = (
+    "Return only valid JSON for the requested schema. "
+    "Do not include extra text, markdown, or code fences. "
+    "Ensure answer_key is one of A/B/C/D; if insufficient evidence, use 'A'."
+)
+_EVIDENCE_FOCUS_INSTRUCTION = (
+    "Ensure the correct answer is directly supported by the evidence and "
+    "quote the exact supporting span."
+)
+_DEDUPLICATE_INSTRUCTION = (
+    "Generate a different question from previous ones; avoid repeating stems."
+)
 _V2_FAILED_CHECKS = {
     "evidence_span_mismatch",
     "evidence_span_empty",
@@ -118,6 +130,39 @@ def _summarize_verification_results(
     return status_counts, sorted(failed_checks)
 
 
+def _normalize_stem(value: str) -> str:
+    return " ".join(value.strip().lower().split())
+
+
+def _merge_instructions(*parts: Optional[str]) -> Optional[str]:
+    merged = " ".join(part.strip() for part in parts if part and part.strip())
+    return merged or None
+
+
+def _build_dedupe_instruction(avoid_stems: List[str], limit: int = 2) -> Optional[str]:
+    if not avoid_stems:
+        return None
+    snippets: List[str] = []
+    for stem in avoid_stems[-limit:]:
+        snippet = stem.strip().replace("\n", " ")
+        if len(snippet) > 120:
+            snippet = f"{snippet[:117].rstrip()}..."
+        if snippet:
+            snippets.append(snippet)
+    if not snippets:
+        return _DEDUPLICATE_INSTRUCTION
+    return f"{_DEDUPLICATE_INSTRUCTION} Avoid these stems: {'; '.join(snippets)}."
+
+
+def _get_llm_error_reason(question: QuestionItem) -> Optional[str]:
+    for meta in (question.meta.verification, question.meta.retrieval):
+        if isinstance(meta, dict):
+            error = meta.get("error")
+            if isinstance(error, str) and error.strip():
+                return error
+    return None
+
+
 def _load_corpus() -> DocumentStore:
     store = DocumentStore()
     pubmed_limit = max(settings.CORPUS_PUBMED_MAX_DOCS, 0)
@@ -188,6 +233,7 @@ def _generate_single_question(
     retriever: Retriever,
     llm_client: LLMClient,
     reviewer_client: Optional[ReviewerClient],
+    avoid_stems: List[str],
 ) -> tuple[QuestionItem, List[Dict[str, object]]]:
     attempt_history: List[Dict[str, object]] = []
     attempt_logs: List[Dict[str, object]] = []
@@ -264,13 +310,20 @@ def _generate_single_question(
             final_question.meta.timings_ms.setdefault("verification", 0.0)
             break
 
-        evidence_text = render_evidence(retrieval_result.evidence_docs)
+        evidence_docs = list(retrieval_result.evidence_docs)
+        if avoid_stems and evidence_docs:
+            offset = len(avoid_stems) % len(evidence_docs)
+            if offset:
+                evidence_docs = evidence_docs[offset:] + evidence_docs[:offset]
+        dedupe_instruction = _build_dedupe_instruction(avoid_stems)
+        combined_instructions = _merge_instructions(extra_instructions, dedupe_instruction)
+        evidence_text = render_evidence(evidence_docs)
         prompt = build_prompt(
             item.topic,
             item.competency,
             evidence_text,
             1,
-            extra_instructions=extra_instructions,
+            extra_instructions=combined_instructions,
         )
         prompt_hash = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
         llm_start = time.perf_counter()
@@ -279,7 +332,7 @@ def _generate_single_question(
             item.competency,
             evidence_text,
             1,
-            extra_instructions=extra_instructions,
+            extra_instructions=combined_instructions,
         )
         llm_ms = (time.perf_counter() - llm_start) * 1000.0
 
@@ -300,9 +353,20 @@ def _generate_single_question(
             question.meta.timings_ms.setdefault("llm", llm_ms)
             question.meta.timings_ms.setdefault("verification", verification_ms)
 
+        question_result = verification_results[0].question
+        normalized_stem = _normalize_stem(question_result.stem or "")
+        is_duplicate = bool(
+            normalized_stem
+            and normalized_stem
+            in {_normalize_stem(stem) for stem in avoid_stems}
+        )
+        llm_error = _get_llm_error_reason(question_result)
+
         status_counts, failed_checks = _summarize_verification_results(
             verification_results
         )
+        if is_duplicate:
+            failed_checks = sorted(set(failed_checks) | {"duplicate_question"})
         attempt_logs.append(
             {
                 "attempt": attempt,
@@ -339,25 +403,51 @@ def _generate_single_question(
             }
         )
 
-        if status_counts.get("OK", 0) == len(verification_results):
-            final_question = verification_results[0].question
+        if status_counts.get("OK", 0) == len(verification_results) and (
+            question_result.status == "OK"
+        ) and not is_duplicate:
+            final_question = question_result
             break
 
         if attempt < _MAX_ATTEMPTS:
             if status_counts.get("INSUFFICIENT_EVIDENCE", 0) > 0 or (
-                "missing_evidence" in failed_checks
-            ):
+                question_result.status == "INSUFFICIENT_EVIDENCE"
+            ) or ("missing_evidence" in failed_checks):
                 evidence_top_k = expanded_top_k
                 query_override = _rewrite_query(item.topic, item.competency)
                 attempt_reason = "v3_insufficient"
                 extra_instructions = None
                 continue
+            if is_duplicate:
+                extra_instructions = _merge_instructions(
+                    _DEDUPLICATE_INSTRUCTION,
+                    _EVIDENCE_FOCUS_INSTRUCTION,
+                )
+                attempt_reason = "v7_deduplicate"
+                continue
+            if llm_error in ("invalid_json", "short", "empty_response") or (
+                "schema_validation" in failed_checks
+            ):
+                extra_instructions = _STRICT_JSON_INSTRUCTION
+                attempt_reason = "v4_json_strict"
+                continue
             if any(check in _V2_FAILED_CHECKS for check in failed_checks):
                 extra_instructions = _REQUOTE_INSTRUCTION
                 attempt_reason = "v2_requote"
                 continue
+            if any(
+                check in ("reviewer_mismatch", "reviewer_insufficient")
+                for check in failed_checks
+            ):
+                extra_instructions = _EVIDENCE_FOCUS_INSTRUCTION
+                attempt_reason = "v5_reviewer"
+                continue
+            if question_result.status != "OK":
+                extra_instructions = _EVIDENCE_FOCUS_INSTRUCTION
+                attempt_reason = "v6_retry"
+                continue
 
-        final_question = verification_results[0].question
+        final_question = question_result
         break
 
     if final_question is None:
@@ -400,6 +490,7 @@ def run_pipeline_stream(
         item_attempts: List[Dict[str, object]] = []
         item_outputs: List[Dict[str, object]] = []
         item_reports: List[object] = []
+        used_stems: List[str] = []
 
         try:
             if item.n_questions < 1:
@@ -430,12 +521,15 @@ def run_pipeline_stream(
                     retriever,
                     llm_client,
                     reviewer_client,
+                    used_stems,
                 )
                 for log in attempt_logs:
                     log["question_index"] = question_index
                     item_attempts.append(log)
                 item_outputs.append(question.model_dump())
                 item_reports.append(question.meta.verification.get("gate"))
+                if question.stem:
+                    used_stems.append(question.stem)
                 completed += 1
                 yield {
                     "type": "question",
@@ -530,256 +624,7 @@ def run_pipeline_stream(
 
 def run_pipeline_batch(payload: List[GenerateRequestItem]) -> List[QuestionItem]:
     results: List[QuestionItem] = []
-    retriever = _get_retriever()
-    llm_client = _get_llm_client()
-    reviewer_client = _get_reviewer_client()
-    run_started = time.perf_counter()
-    run_id = uuid.uuid4().hex
-    run_timestamp = datetime.utcnow().isoformat() + "Z"
-    run_log_items: List[Dict[str, object]] = []
-    input_batch = [item.model_dump() for item in payload]
-
-    for item in payload:
-        try:
-            if item.n_questions < 1:
-                raise ValueError("n_questions must be >= 1")
-
-            if retriever is None:
-                results.extend(build_failure_batch([item], "retriever_unavailable"))
-                continue
-
-            attempt_history: List[Dict[str, object]] = []
-            attempt_logs: List[Dict[str, object]] = []
-            final_questions: Optional[List[QuestionItem]] = None
-            initial_top_k = max(settings.EVIDENCE_TOP_K, 0)
-            expanded_top_k = max(settings.EVIDENCE_TOP_K_EXPANDED, 0)
-            evidence_top_k = initial_top_k
-            query_override: Optional[str] = None
-            extra_instructions: Optional[str] = None
-            attempt_reason = "initial"
-
-            for attempt in range(1, _MAX_ATTEMPTS + 1):
-                query_used = (query_override or "").strip() or build_query(
-                    item.topic, item.competency
-                )
-                retrieval_start = time.perf_counter()
-                retrieval_result = retriever.retrieve(
-                    item.topic,
-                    item.competency,
-                    evidence_top_k=evidence_top_k,
-                    query_override=query_override,
-                )
-                retrieval_ms = (time.perf_counter() - retrieval_start) * 1000.0
-
-                if not retrieval_result.evidence_docs:
-                    attempt_logs.append(
-                        {
-                            "attempt": attempt,
-                            "reason": attempt_reason,
-                            "query": query_used,
-                            "evidence_top_k": evidence_top_k,
-                            "prompt_hash": "",
-                            "evidence_doc_ids": {
-                                "bm25": retrieval_result.bm25_doc_ids,
-                                "dense": retrieval_result.dense_doc_ids,
-                                "fused": retrieval_result.fused_doc_ids,
-                            },
-                            "runtime_ms": {
-                                "retrieval": retrieval_ms,
-                                "llm": 0.0,
-                                "verification": 0.0,
-                            },
-                            "status_counts": {"INSUFFICIENT_EVIDENCE": item.n_questions},
-                            "failed_checks": ["insufficient_evidence"],
-                        }
-                    )
-                    attempt_history.append(
-                        {
-                            "attempt": attempt,
-                            "reason": attempt_reason,
-                            "query": query_used,
-                            "evidence_top_k": evidence_top_k,
-                            "retrieval_ms": retrieval_ms,
-                            "status_counts": {"INSUFFICIENT_EVIDENCE": item.n_questions},
-                            "failed_checks": ["insufficient_evidence"],
-                        }
-                    )
-                    if attempt < _MAX_ATTEMPTS:
-                        evidence_top_k = expanded_top_k
-                        query_override = _rewrite_query(item.topic, item.competency)
-                        attempt_reason = "v3_insufficient"
-                        extra_instructions = None
-                        continue
-                    final_questions = build_failure_batch(
-                        [item],
-                        "insufficient_evidence",
-                        status="INSUFFICIENT_EVIDENCE",
-                    )
-                    for question in final_questions:
-                        question.meta.retrieval.setdefault("retrieval_mode", settings.RETRIEVAL_MODE)
-                        question.meta.timings_ms.setdefault("retrieval", retrieval_ms)
-                        question.meta.timings_ms.setdefault("llm", 0.0)
-                        question.meta.timings_ms.setdefault("verification", 0.0)
-                    break
-
-                evidence_text = render_evidence(retrieval_result.evidence_docs)
-                prompt = build_prompt(
-                    item.topic,
-                    item.competency,
-                    evidence_text,
-                    item.n_questions,
-                    extra_instructions=extra_instructions,
-                )
-                prompt_hash = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
-                llm_start = time.perf_counter()
-                questions = llm_client.generate_mcq(
-                    item.topic,
-                    item.competency,
-                    evidence_text,
-                    item.n_questions,
-                    extra_instructions=extra_instructions,
-                )
-                llm_ms = (time.perf_counter() - llm_start) * 1000.0
-
-                verification_start = time.perf_counter()
-                verification_results = verify_questions(
-                    questions,
-                    retrieval_result.evidence_docs,
-                    reviewer=reviewer_client,
-                    run_reviewer=True,
-                )
-                verification_ms = (time.perf_counter() - verification_start) * 1000.0
-
-                for result in verification_results:
-                    question = result.question
-                    question.meta.retrieval.setdefault("doc_ids", retrieval_result.doc_ids)
-                    question.meta.retrieval.setdefault("retrieval_mode", settings.RETRIEVAL_MODE)
-                    question.meta.timings_ms.setdefault("retrieval", retrieval_ms)
-                    question.meta.timings_ms.setdefault("llm", llm_ms)
-                    question.meta.timings_ms.setdefault("verification", verification_ms)
-
-                status_counts, failed_checks = _summarize_verification_results(
-                    verification_results
-                )
-                attempt_logs.append(
-                    {
-                        "attempt": attempt,
-                        "reason": attempt_reason,
-                        "query": query_used,
-                        "evidence_top_k": evidence_top_k,
-                        "prompt_hash": prompt_hash,
-                        "evidence_doc_ids": {
-                            "bm25": retrieval_result.bm25_doc_ids,
-                            "dense": retrieval_result.dense_doc_ids,
-                            "fused": retrieval_result.fused_doc_ids,
-                        },
-                        "runtime_ms": {
-                            "retrieval": retrieval_ms,
-                            "llm": llm_ms,
-                            "verification": verification_ms,
-                        },
-                        "status_counts": status_counts,
-                        "failed_checks": failed_checks,
-                    }
-                )
-                attempt_history.append(
-                    {
-                        "attempt": attempt,
-                        "reason": attempt_reason,
-                        "query": query_used,
-                        "evidence_top_k": evidence_top_k,
-                        "retrieval_ms": retrieval_ms,
-                        "llm_ms": llm_ms,
-                        "verification_ms": verification_ms,
-                        "extra_instructions": extra_instructions or "",
-                        "status_counts": status_counts,
-                        "failed_checks": failed_checks,
-                    }
-                )
-
-                if status_counts.get("OK", 0) == len(verification_results):
-                    final_questions = [result.question for result in verification_results]
-                    break
-
-                if attempt < _MAX_ATTEMPTS:
-                    if status_counts.get("INSUFFICIENT_EVIDENCE", 0) > 0 or (
-                        "missing_evidence" in failed_checks
-                    ):
-                        evidence_top_k = expanded_top_k
-                        query_override = _rewrite_query(item.topic, item.competency)
-                        attempt_reason = "v3_insufficient"
-                        extra_instructions = None
-                        continue
-                    if any(check in _V2_FAILED_CHECKS for check in failed_checks):
-                        extra_instructions = _REQUOTE_INSTRUCTION
-                        attempt_reason = "v2_requote"
-                        continue
-
-                final_questions = [result.question for result in verification_results]
-                break
-
-            if final_questions is None:
-                final_questions = build_failure_batch(
-                    [item],
-                    "pipeline_error",
-                    status="FAILED_VERIFICATION",
-                )
-
-            for question in final_questions:
-                verification_meta = dict(question.meta.verification or {})
-                verification_meta["attempt_history"] = attempt_history
-                question.meta.verification = verification_meta
-
-            results.extend(final_questions)
-            run_log_items.append(
-                {
-                    "input": item.model_dump(),
-                    "attempts": attempt_logs,
-                    "outputs": [question.model_dump() for question in final_questions],
-                    "verification_reports": [
-                        question.meta.verification.get("gate") for question in final_questions
-                    ],
-                }
-            )
-        except ValueError as exc:
-            failure_questions = build_failure_batch([item], str(exc), status="FAILED_VERIFICATION")
-            results.extend(failure_questions)
-            run_log_items.append(
-                {
-                    "input": item.model_dump(),
-                    "attempts": [],
-                    "outputs": [question.model_dump() for question in failure_questions],
-                    "verification_reports": [
-                        question.meta.verification.get("gate") for question in failure_questions
-                    ],
-                }
-            )
-        except Exception as exc:
-            failure_questions = build_failure_batch(
-                [item], f"pipeline_error: {exc}", status="FAILED_VERIFICATION"
-            )
-            results.extend(failure_questions)
-            run_log_items.append(
-                {
-                    "input": item.model_dump(),
-                    "attempts": [],
-                    "outputs": [question.model_dump() for question in failure_questions],
-                    "verification_reports": [
-                        question.meta.verification.get("gate") for question in failure_questions
-                    ],
-                }
-            )
-
-    run_record = {
-        "run_id": run_id,
-        "timestamp": run_timestamp,
-        "input_batch": input_batch,
-        "items": run_log_items,
-        "runtime_ms": (time.perf_counter() - run_started) * 1000.0,
-    }
-    try:
-        log_run(run_record)
-    except Exception as exc:
-        LOGGER.warning("Failed to log run: %s", exc)
-
+    for event in run_pipeline_stream(payload):
+        if event.get("type") == "question":
+            results.append(QuestionItem.model_validate(event["question"]))
     return results

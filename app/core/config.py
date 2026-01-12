@@ -26,6 +26,8 @@ class Settings(BaseSettings):
     LLM_TEMPERATURE: float = 0.2
     LLM_TOP_P: float = 1.0
     LLM_MAX_COMPLETION_TOKENS: int = 2048
+    LLM_JSON_MODE: bool = True
+    LLM_MAX_ATTEMPTS: int = 4
     LLM_REASONING_EFFORT: str = ""
     LLM_STOP: str = ""
     LLM_STREAM: bool = False

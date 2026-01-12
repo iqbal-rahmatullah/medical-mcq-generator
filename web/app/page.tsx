@@ -100,6 +100,7 @@ export default function HomePage() {
   const [progress, setProgress] = useState<ProgressState | null>(null)
   const socketRef = useRef<WebSocket | null>(null)
   const runIdRef = useRef(0)
+  const resultsRef = useRef<ApiQuestion[]>([])
 
   useEffect(() => {
     return () => {
@@ -184,6 +185,7 @@ export default function HomePage() {
   const handleGenerate = () => {
     setError('')
     setResults([])
+    resultsRef.current = []
     setProgress(null)
     const payload = buildPayload()
 
@@ -228,7 +230,8 @@ export default function HomePage() {
       }
 
       if (data.type === 'question') {
-        setResults((prev) => [...prev, data.question])
+        resultsRef.current = [...resultsRef.current, data.question]
+        setResults(resultsRef.current)
       }
 
       if (data.type === 'progress') {
