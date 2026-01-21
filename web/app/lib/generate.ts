@@ -21,6 +21,7 @@ export type ApiQuestion = {
   stem: string
   options: Options
   answer_key: AnswerKey
+  explanation?: string
   evidence?: EvidenceItem[]
   status?: QuestionStatus
 }

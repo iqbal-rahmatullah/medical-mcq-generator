@@ -295,6 +295,7 @@ def _get_retriever_cache_path() -> Optional[Path]:
 
 def _build_retriever_cache_fingerprint() -> str:
     payload = {
+        "corpus_schema_version": 2,
         "pubmed_dataset": settings.CORPUS_PUBMED_HF_DATASET,
         "textbooks_dataset": settings.CORPUS_TEXTBOOKS_HF_DATASET,
         "pubmed_max_docs": settings.CORPUS_PUBMED_MAX_DOCS,
@@ -507,7 +508,11 @@ def _generate_single_question(
         evidence_doc_ids = [doc.doc_id for doc in evidence_docs_for_prompt]
         dedupe_instruction = _build_dedupe_instruction(avoid_stems)
         combined_instructions = _merge_instructions(extra_instructions, dedupe_instruction)
-        evidence_text = render_evidence(evidence_docs_for_prompt)
+        evidence_text = render_evidence(
+            evidence_docs_for_prompt,
+            max_chars_per_doc=settings.EVIDENCE_MAX_CHARS_PER_DOC,
+            max_total_chars=settings.EVIDENCE_MAX_TOTAL_CHARS,
+        )
         candidate_count = _CANDIDATES_PER_ATTEMPT
         prompt = build_prompt(
             item.topic,

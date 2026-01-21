@@ -5,7 +5,11 @@ type QuestionOption = {
 
 type EvidenceBlock = {
   label: string;
-  source: string;
+  items: Array<{
+    docId: string;
+    source: string;
+    span: string;
+  }>;
 };
 
 type QuestionStatus = "OK" | "INSUFFICIENT_EVIDENCE" | "FAILED_VERIFICATION";
@@ -17,6 +21,7 @@ type QuestionCardProps = {
   prompt: string;
   options: QuestionOption[];
   selectedKey?: QuestionOption["key"];
+  explanation?: string;
   evidence?: EvidenceBlock;
   status?: QuestionStatus;
 };
@@ -28,11 +33,13 @@ export default function QuestionCard({
   prompt,
   options,
   selectedKey,
+  explanation,
   evidence,
   status
 }: QuestionCardProps) {
   const showStatus = status && status !== "OK";
   const showMeta = Boolean(topic || competency);
+  const showExplanation = Boolean(selectedKey && explanation);
 
   return (
     <article className="question-card">
@@ -63,6 +70,12 @@ export default function QuestionCard({
             <span className="option-label">
               <strong>{option.key}.</strong> {option.text}
             </span>
+            {showExplanation && option.key === selectedKey ? (
+              <details className="explanation-panel">
+                <summary className="explanation-summary">Explanation</summary>
+                <p className="explanation-text">{explanation}</p>
+              </details>
+            ) : null}
           </li>
         ))}
       </ul>
@@ -70,7 +83,19 @@ export default function QuestionCard({
       {evidence ? (
         <div className="evidence-card">
           <p className="evidence-title">{evidence.label}</p>
-          <p className="evidence-text">{evidence.source}</p>
+          <ul className="evidence-list">
+            {evidence.items.map((item, itemIndex) => (
+              <li key={`${item.docId}-${itemIndex}`} className="evidence-item">
+                <div className="evidence-meta">
+                  <span className="evidence-source">{item.source}</span>
+                  <span className="evidence-doc">{item.docId}</span>
+                </div>
+                {item.span ? (
+                  <p className="evidence-text">{item.span}</p>
+                ) : null}
+              </li>
+            ))}
+          </ul>
         </div>
       ) : null}
     </article>

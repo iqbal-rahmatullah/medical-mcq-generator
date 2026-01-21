@@ -42,6 +42,8 @@ class Settings(BaseSettings):
     EVIDENCE_FIRST: bool = True
     EVIDENCE_FIRST_MAX_SENTENCES: int = 2
     EVIDENCE_FIRST_MAX_CHARS: int = 600
+    EVIDENCE_MAX_CHARS_PER_DOC: int = 800
+    EVIDENCE_MAX_TOTAL_CHARS: int = 4000
     QUESTION_BANK_PATH: str = "app/logging/question_bank.jsonl"
     QUESTION_BANK_FALLBACK: bool = True
     QUESTION_BANK_WRITE_OK: bool = True

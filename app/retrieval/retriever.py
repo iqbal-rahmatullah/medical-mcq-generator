@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 from typing import List, Optional
 
@@ -11,6 +12,24 @@ from app.retrieval.medcpt_runtime import MedCPTRuntime
 from app.retrieval.query_builder import build_query
 
 LOGGER = logging.getLogger(__name__)
+_TOKEN_RE = re.compile(r"[a-z0-9]+")
+
+
+def _tokenize(text: str) -> List[str]:
+    return _TOKEN_RE.findall(text.lower())
+
+
+def _filter_by_topic(docs: List[Document], topic: str) -> List[Document]:
+    topic_tokens = {token for token in _tokenize(topic) if len(token) >= 2}
+    if not topic_tokens:
+        return docs
+
+    filtered: List[Document] = []
+    for doc in docs:
+        doc_tokens = set(_tokenize(f"{doc.title} {doc.text}"))
+        if topic_tokens & doc_tokens:
+            filtered.append(doc)
+    return filtered
 
 
 @dataclass(frozen=True)
@@ -89,6 +108,13 @@ class Retriever:
             filtered = [doc for doc in candidate_docs if doc.doc_id not in exclude_doc_ids]
             if filtered:
                 candidate_docs = filtered
+        topic_filtered = _filter_by_topic(candidate_docs, topic)
+        if topic_filtered:
+            candidate_docs = topic_filtered
+        else:
+            LOGGER.debug(
+                "topic filter removed all candidates; using unfiltered bm25 results"
+            )
         doc_lookup = {doc.doc_id: doc for doc in candidate_docs}
         candidate_ids = [doc.doc_id for doc in candidate_docs]
         LOGGER.debug("bm25 candidates: %s", candidate_ids)

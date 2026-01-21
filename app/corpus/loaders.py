@@ -29,8 +29,9 @@ def load_pubmed_jsonl(path: str) -> Iterator[Document]:
             payload = json.loads(line)
             doc_id = normalize_text(str(payload.get("doc_id", "")))
             title = normalize_text(str(payload.get("title", "")))
-            abstract = normalize_text(str(payload.get("abstract", "")))
-            text = normalize_text(" ".join(part for part in [title, abstract] if part))
+            body = payload.get("content") or payload.get("contents") or ""
+            body = normalize_text(str(body))
+            text = body or title
             if not doc_id:
                 continue
             yield Document(
@@ -50,8 +51,9 @@ def load_textbooks_jsonl(path: str) -> Iterator[Document]:
             payload = json.loads(line)
             doc_id = normalize_text(str(payload.get("doc_id", "")))
             title = normalize_text(str(payload.get("title", "")))
-            snippet = normalize_text(str(payload.get("snippet", "")))
-            text = normalize_text(" ".join(part for part in [title, snippet] if part))
+            body = payload.get("text") or payload.get("content") or payload.get("contents") or payload.get("snippet") or ""
+            body = normalize_text(str(body))
+            text = normalize_text(" ".join(part for part in [title, body] if part))
             if not doc_id:
                 continue
             yield Document(
@@ -86,8 +88,9 @@ def load_pubmed_hf(
     for row in dataset:
         doc_id = normalize_text(str(row.get("doc_id") or row.get("id") or row.get("pmid") or ""))
         title = normalize_text(str(row.get("title", "")))
-        abstract = normalize_text(str(row.get("abstract") or row.get("text") or ""))
-        text = normalize_text(" ".join(part for part in [title, abstract] if part))
+        body = row.get("content") or row.get("contents") or row.get("text") or row.get("abstract") or ""
+        body = normalize_text(str(body))
+        text = body or title
         if not doc_id:
             continue
         yield Document(
@@ -122,8 +125,9 @@ def load_textbooks_hf(
     for row in dataset:
         doc_id = normalize_text(str(row.get("doc_id") or row.get("id") or ""))
         title = normalize_text(str(row.get("title", "")))
-        snippet = normalize_text(str(row.get("snippet") or row.get("text") or ""))
-        text = normalize_text(" ".join(part for part in [title, snippet] if part))
+        body = row.get("text") or row.get("content") or row.get("contents") or row.get("snippet") or ""
+        body = normalize_text(str(body))
+        text = normalize_text(" ".join(part for part in [title, body] if part))
         if not doc_id:
             continue
         yield Document(

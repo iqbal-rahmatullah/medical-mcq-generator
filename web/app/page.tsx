@@ -35,10 +35,18 @@ export default function HomePage() {
         C: '-',
         D: '-',
       }
-      const evidenceText = (question.evidence || [])
-        .map((item) => item.span_text)
-        .filter(Boolean)
-        .join(' ')
+      const evidenceItems = (question.evidence || [])
+        .map((item) => {
+          const docId = item.doc_id || ''
+          const source = item.source || ''
+          const span = item.span_text || ''
+          return {
+            docId,
+            source,
+            span,
+          }
+        })
+        .filter((item) => item.docId || item.span)
 
       return {
         index: index + 1,
@@ -52,10 +60,11 @@ export default function HomePage() {
           { key: 'D' as const, text: options.D || '-' },
         ],
         selectedKey: showAnswers ? question.answer_key : undefined,
-        evidence: evidenceText
+        explanation: question.explanation || '',
+        evidence: evidenceItems.length
           ? {
               label: 'Source Evidence / RAG Context',
-              source: evidenceText,
+              items: evidenceItems,
             }
           : undefined,
         status: question.status,
@@ -214,7 +223,26 @@ export default function HomePage() {
                 />
               }
             >
-              {!results.length && loading ? (
+              {results.length ? (
+                <div className='question-list'>
+                  {questionCards.map((question) => (
+                    <QuestionCard
+                      key={question.prompt.slice(0, 24)}
+                      index={question.index}
+                      topic={question.topic}
+                      competency={question.competency}
+                      prompt={question.prompt}
+                      options={question.options}
+                      selectedKey={question.selectedKey}
+                      explanation={question.explanation}
+                      evidence={question.evidence}
+                      status={question.status}
+                    />
+                  ))}
+                </div>
+              ) : null}
+
+              {loading ? (
                 <div className='empty-state is-loading'>
                   <div className='loading-orbit' aria-hidden='true'>
                     <span className='loading-ring'></span>
@@ -227,23 +255,9 @@ export default function HomePage() {
                   </p>
                   <div className='loading-bar' aria-hidden='true'></div>
                 </div>
-              ) : results.length ? (
-                <div className='question-list'>
-                  {questionCards.map((question) => (
-                    <QuestionCard
-                      key={question.prompt.slice(0, 24)}
-                      index={question.index}
-                      topic={question.topic}
-                      competency={question.competency}
-                      prompt={question.prompt}
-                      options={question.options}
-                      selectedKey={question.selectedKey}
-                      evidence={question.evidence}
-                      status={question.status}
-                    />
-                  ))}
-                </div>
-              ) : (
+              ) : null}
+
+              {!loading && !results.length ? (
                 <div className='empty-state'>
                   <div className='empty-icon' aria-hidden='true'>
                     <svg viewBox='0 0 48 48'>
@@ -257,7 +271,7 @@ export default function HomePage() {
                     Add a topic on the left and click Generate Questions.
                   </p>
                 </div>
-              )}
+              ) : null}
             </SectionCard>
           </div>
         </div>

@@ -8,6 +8,7 @@ from typing import Iterable, List, Optional
 from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 
 from app.corpus.models import Document
+from app.core.config import settings
 from app.generation.evidence_format import render_evidence
 from app.generation.llm_client import LLMClient
 from app.schemas.response import QuestionItem
@@ -70,7 +71,11 @@ def verify_questions(
             and not failed_checks
         ):
             try:
-                evidence_text = render_evidence(evidence_docs)
+                evidence_text = render_evidence(
+                    evidence_docs,
+                    max_chars_per_doc=settings.EVIDENCE_MAX_CHARS_PER_DOC,
+                    max_total_chars=settings.EVIDENCE_MAX_TOTAL_CHARS,
+                )
                 decision = reviewer.review(question, evidence_text)
                 if decision == "INSUFFICIENT":
                     failed_checks.append("reviewer_insufficient")
