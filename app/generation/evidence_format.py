@@ -6,6 +6,7 @@ from typing import Iterable, List
 from app.corpus.models import Document
 
 _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
+_WORD_RE = re.compile(r"[A-Za-z0-9]+")
 
 
 def _truncate_text(text: str, max_chars: int) -> str:
@@ -71,3 +72,64 @@ def render_evidence(
             break
 
     return "\n".join(lines)
+
+
+def extract_evidence_spans(
+    evidence_docs: Iterable[Document],
+    topic: str,
+    competency: str,
+    max_sentences_per_doc: int = 2,
+    max_chars_per_doc: int = 600,
+) -> List[Document]:
+    keywords = {
+        token
+        for token in _WORD_RE.findall(f"{topic} {competency}".lower())
+        if len(token) > 2
+    }
+    results: List[Document] = []
+
+    for doc in evidence_docs:
+        sentences = [s.strip() for s in _SENTENCE_SPLIT_RE.split(doc.text) if s.strip()]
+        if not sentences:
+            continue
+
+        span_sentences = max(max_sentences_per_doc, 1)
+        if not keywords:
+            span = " ".join(sentences[:span_sentences])
+        else:
+            best_span = ""
+            best_score = -1
+            best_len = 0
+            total = len(sentences)
+            for start in range(total):
+                span_text = ""
+                for end in range(start, min(total, start + span_sentences)):
+                    span_text = " ".join(sentences[start : end + 1])
+                    span_lower = span_text.lower()
+                    score = sum(1 for kw in keywords if kw in span_lower)
+                    span_len = len(span_text)
+                    if (
+                        score > best_score
+                        or (score == best_score and (best_len == 0 or span_len < best_len))
+                    ):
+                        best_span = span_text
+                        best_score = score
+                        best_len = span_len
+            span = best_span or " ".join(sentences[:span_sentences])
+
+        if max_chars_per_doc <= 0:
+            continue
+        if len(span) > max_chars_per_doc:
+            span = span[:max_chars_per_doc].rstrip()
+        if not span:
+            continue
+        results.append(
+            Document(
+                doc_id=doc.doc_id,
+                source=doc.source,
+                title=doc.title,
+                text=span,
+            )
+        )
+
+    return results

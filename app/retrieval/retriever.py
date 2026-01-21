@@ -79,11 +79,16 @@ class Retriever:
         *,
         evidence_top_k: Optional[int] = None,
         query_override: Optional[str] = None,
+        exclude_doc_ids: Optional[set[str]] = None,
     ) -> RetrievalResult:
         query = (query_override or "").strip() or build_query(topic, competency)
         candidates_limit = max(self._bm25_candidates_top_n, 0)
         bm25_results = self._bm25_index.search(query, top_k=candidates_limit)
         candidate_docs = [doc for doc, _score in bm25_results]
+        if exclude_doc_ids:
+            filtered = [doc for doc in candidate_docs if doc.doc_id not in exclude_doc_ids]
+            if filtered:
+                candidate_docs = filtered
         doc_lookup = {doc.doc_id: doc for doc in candidate_docs}
         candidate_ids = [doc.doc_id for doc in candidate_docs]
         LOGGER.debug("bm25 candidates: %s", candidate_ids)

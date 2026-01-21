@@ -12,7 +12,7 @@ Constraints:
     "competency": "...",
     "stem": "...",
     "options": {{"A": "...", "B": "...", "C": "...", "D": "..."}},
-    "answer_key": "A|B|C|D",
+    "answer_key": "A",
     "explanation": "...",
     "evidence": [
       {{"source": "...", "doc_id": "...", "title": "...", "span_text": "..."}}
@@ -24,12 +24,18 @@ Constraints:
       "timings_ms": {{"...": 0}}
     }}
   }}
+- Never output empty objects or omit required keys.
+- Never leave stem/options/explanation empty.
+- answer_key MUST be a single letter: "A", "B", "C", or "D" (do NOT use "A|B|C|D").
 
 Evidence rules:
 - Use only the evidence provided below.
-- evidence.span_text MUST be a verbatim quote of 1-2 sentences from one [E#] entry.
+- evidence.span_text MUST be a verbatim quote of up to 5 sentences from one [E#] entry.
+- evidence.doc_id MUST match the id shown in the chosen [E#] entry.
 - If evidence is insufficient for a question, set status=INSUFFICIENT_EVIDENCE,
-  provide empty strings for stem/options/explanation as needed, and set evidence=[].
+  keep the full schema with non-empty placeholders (use the literal text
+  "Insufficient evidence." for stem/options/explanation), set evidence=[],
+  and still set answer_key to "A".
 - For OK items, include at least 1 evidence entry.
 
 Style rules:

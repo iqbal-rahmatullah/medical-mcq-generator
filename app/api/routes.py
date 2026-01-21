@@ -48,7 +48,7 @@ async def generate_questions_ws(websocket: WebSocket) -> None:
         return
 
     try:
-        for event in run_pipeline_stream(payload):
+        for event in run_pipeline_stream(payload, include_failed=False):
             await websocket.send_json(event)
     except WebSocketDisconnect:
         return
