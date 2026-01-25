@@ -16,6 +16,7 @@ from app.schemas.response import QuestionItem
 LOGGER = logging.getLogger(__name__)
 
 _ANSWER_RE = re.compile(r"\b([A-D])\b", re.IGNORECASE)
+_TOPIC_TOKEN_RE = re.compile(r"[A-Za-z0-9]+")
 
 
 class VerificationReport(BaseModel):
@@ -63,6 +64,7 @@ def verify_questions(
             notes.append(str(exc))
 
         failed_checks.extend(_check_evidence_spans(question, doc_lookup, notes))
+        failed_checks.extend(_check_topic_coverage(question, doc_lookup, notes))
 
         if (
             run_reviewer
@@ -91,7 +93,10 @@ def verify_questions(
             **{"pass": len(failed_checks) == 0, "failed_checks": failed_checks, "notes": notes}
         )
         if failed_checks:
-            question.status = "FAILED_VERIFICATION"
+            if "topic_coverage" in failed_checks:
+                question.status = "INSUFFICIENT_EVIDENCE"
+            else:
+                question.status = "FAILED_VERIFICATION"
 
         verification_meta = dict(question.meta.verification or {})
         verification_meta["gate"] = report.model_dump(by_alias=True)
@@ -130,6 +135,39 @@ def _check_evidence_spans(
             failed_checks.append("evidence_span_mismatch")
             notes.append(f"span not found in doc_id: {evidence.doc_id}")
 
+    return failed_checks
+
+
+def _check_topic_coverage(
+    question: QuestionItem,
+    doc_lookup: dict[str, Document],
+    notes: List[str],
+) -> List[str]:
+    failed_checks: List[str] = []
+    topic_tokens = {
+        token.lower()
+        for token in _TOPIC_TOKEN_RE.findall(question.topic or "")
+        if len(token) > 2
+    }
+    if not topic_tokens:
+        return failed_checks
+
+    evidence_docs = [
+        doc_lookup.get(evidence.doc_id)
+        for evidence in question.evidence
+        if evidence.doc_id in doc_lookup
+    ]
+    evidence_docs = [doc for doc in evidence_docs if doc is not None]
+    if not evidence_docs:
+        return failed_checks
+
+    for doc in evidence_docs:
+        doc_text = _normalize_match_text(f"{doc.title} {doc.text}")
+        if any(token in doc_text for token in topic_tokens):
+            return failed_checks
+
+    failed_checks.append("topic_coverage")
+    notes.append("no topic token found in evidence docs")
     return failed_checks
 
 

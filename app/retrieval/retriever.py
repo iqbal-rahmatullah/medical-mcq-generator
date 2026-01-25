@@ -108,13 +108,7 @@ class Retriever:
             filtered = [doc for doc in candidate_docs if doc.doc_id not in exclude_doc_ids]
             if filtered:
                 candidate_docs = filtered
-        topic_filtered = _filter_by_topic(candidate_docs, topic)
-        if topic_filtered:
-            candidate_docs = topic_filtered
-        else:
-            LOGGER.debug(
-                "topic filter removed all candidates; using unfiltered bm25 results"
-            )
+        candidate_docs = _filter_by_topic(candidate_docs, topic)
         doc_lookup = {doc.doc_id: doc for doc in candidate_docs}
         candidate_ids = [doc.doc_id for doc in candidate_docs]
         LOGGER.debug("bm25 candidates: %s", candidate_ids)

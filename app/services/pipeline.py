@@ -13,14 +13,16 @@ from typing import Dict, Iterator, List, Optional
 
 from app.core.config import settings
 from app.corpus.loaders import load_pubmed_hf, load_textbooks_hf
+from app.corpus.models import Document
 from app.corpus.store import DocumentStore
 from app.generation.evidence_format import extract_evidence_spans, render_evidence
 from app.generation.llm_client import LLMClient
 from app.generation.prompt_templates import build_prompt
 from app.retrieval.bm25 import BM25Index
 from app.retrieval.medcpt_runtime import MedCPTRuntime
+from app.retrieval.pubmed_web import fetch_pubmed_documents
 from app.retrieval.query_builder import build_query
-from app.retrieval.retriever import Retriever
+from app.retrieval.retriever import RetrievalResult, Retriever
 from app.schemas.request import GenerateRequestItem
 from app.schemas.response import Meta, Options, QuestionItem, QuestionStatus
 from app.logging.logger import log_run
@@ -90,6 +92,18 @@ def _build_failure_question(
         evidence=[],
         status=status,
         meta=meta,
+    )
+
+
+def _fetch_pubmed_fallback(query: str) -> List[Document]:
+    if not settings.PUBMED_WEB_ENABLED:
+        return []
+    return fetch_pubmed_documents(
+        query,
+        max_results=max(settings.PUBMED_WEB_MAX_RESULTS, 0),
+        api_key=(settings.PUBMED_API_KEY or "").strip() or None,
+        email=(settings.PUBMED_EMAIL or "").strip() or None,
+        timeout_sec=max(settings.PUBMED_WEB_TIMEOUT_SEC, 1.0),
     )
 
 
@@ -398,6 +412,9 @@ def _generate_single_question(
     query_override: Optional[str] = None
     extra_instructions: Optional[str] = None
     attempt_reason = "initial"
+    override_docs: Optional[List[Document]] = None
+    override_reason: Optional[str] = None
+    override_retrieval_ms = 0.0
     track_doc_ids = used_doc_ids is not None
     doc_id_tracker = used_doc_ids if used_doc_ids is not None else set()
     final_evidence_doc_ids: List[str] = []
@@ -406,21 +423,60 @@ def _generate_single_question(
         query_used = (query_override or "").strip() or build_query(
             item.topic, item.competency
         )
-        retrieval_start = time.perf_counter()
-        retrieval_result = retriever.retrieve(
-            item.topic,
-            item.competency,
-            evidence_top_k=evidence_top_k,
-            query_override=query_override,
-            exclude_doc_ids=doc_id_tracker if doc_id_tracker else None,
-        )
-        retrieval_ms = (time.perf_counter() - retrieval_start) * 1000.0
+        attempt_reason_used = attempt_reason
+        retrieval_mode = settings.RETRIEVAL_MODE
+        web_retrieval_ms = 0.0
+        pubmed_attempted = False
+        pubmed_docs_count = 0
+
+        if override_docs is not None:
+            retrieval_mode = "pubmed_web"
+            attempt_reason_used = override_reason or attempt_reason
+            retrieval_result = RetrievalResult(
+                doc_ids=[doc.doc_id for doc in override_docs],
+                evidence_docs=override_docs,
+                bm25_doc_ids=[],
+                dense_doc_ids=[],
+                fused_doc_ids=[doc.doc_id for doc in override_docs],
+            )
+            retrieval_ms = override_retrieval_ms
+        else:
+            retrieval_start = time.perf_counter()
+            retrieval_result = retriever.retrieve(
+                item.topic,
+                item.competency,
+                evidence_top_k=evidence_top_k,
+                query_override=query_override,
+                exclude_doc_ids=doc_id_tracker if doc_id_tracker else None,
+            )
+            retrieval_ms = (time.perf_counter() - retrieval_start) * 1000.0
+
+            if not retrieval_result.evidence_docs:
+                web_start = time.perf_counter()
+                pubmed_attempted = True
+                pubmed_docs = _fetch_pubmed_fallback(query_used)
+                web_retrieval_ms = (time.perf_counter() - web_start) * 1000.0
+                retrieval_ms += web_retrieval_ms
+                pubmed_docs_count = len(pubmed_docs)
+                if pubmed_docs:
+                    retrieval_mode = "pubmed_web"
+                    attempt_reason_used = "pubmed_web_fallback"
+                    override_docs = pubmed_docs
+                    override_reason = "pubmed_web_fallback"
+                    override_retrieval_ms = web_retrieval_ms
+                    retrieval_result = RetrievalResult(
+                        doc_ids=[doc.doc_id for doc in pubmed_docs],
+                        evidence_docs=pubmed_docs,
+                        bm25_doc_ids=[],
+                        dense_doc_ids=[],
+                        fused_doc_ids=[doc.doc_id for doc in pubmed_docs],
+                    )
 
         if not retrieval_result.evidence_docs:
             attempt_logs.append(
                 {
                     "attempt": attempt,
-                    "reason": attempt_reason,
+                    "reason": attempt_reason_used,
                     "query": query_used,
                     "evidence_top_k": evidence_top_k,
                     "prompt_hash": "",
@@ -434,6 +490,12 @@ def _generate_single_question(
                         "llm": 0.0,
                         "verification": 0.0,
                     },
+                    "retrieval_mode": retrieval_mode,
+                    "pubmed_web": {
+                        "attempted": pubmed_attempted,
+                        "docs": pubmed_docs_count,
+                        "runtime_ms": web_retrieval_ms,
+                    },
                     "status_counts": {"INSUFFICIENT_EVIDENCE": 1},
                     "failed_checks": ["insufficient_evidence"],
                 }
@@ -441,10 +503,16 @@ def _generate_single_question(
             attempt_history.append(
                 {
                     "attempt": attempt,
-                    "reason": attempt_reason,
+                    "reason": attempt_reason_used,
                     "query": query_used,
                     "evidence_top_k": evidence_top_k,
                     "retrieval_ms": retrieval_ms,
+                    "retrieval_mode": retrieval_mode,
+                    "pubmed_web": {
+                        "attempted": pubmed_attempted,
+                        "docs": pubmed_docs_count,
+                        "runtime_ms": web_retrieval_ms,
+                    },
                     "status_counts": {"INSUFFICIENT_EVIDENCE": 1},
                     "failed_checks": ["insufficient_evidence"],
                 }
@@ -546,7 +614,7 @@ def _generate_single_question(
             question = result.question
             question.meta.retrieval.setdefault("doc_ids", retrieval_result.doc_ids)
             question.meta.retrieval.setdefault("evidence_doc_ids", evidence_doc_ids)
-            question.meta.retrieval.setdefault("retrieval_mode", settings.RETRIEVAL_MODE)
+            question.meta.retrieval.setdefault("retrieval_mode", retrieval_mode)
             question.meta.timings_ms.setdefault("retrieval", retrieval_ms)
             question.meta.timings_ms.setdefault("llm", llm_ms)
             question.meta.timings_ms.setdefault("verification", verification_ms)
@@ -604,7 +672,7 @@ def _generate_single_question(
         attempt_logs.append(
             {
                 "attempt": attempt,
-                "reason": attempt_reason,
+                "reason": attempt_reason_used,
                 "query": query_used,
                 "evidence_top_k": evidence_top_k,
                 "candidate_count": candidate_count,
@@ -620,6 +688,12 @@ def _generate_single_question(
                     "llm": llm_ms,
                     "verification": verification_ms,
                 },
+                "retrieval_mode": retrieval_mode,
+                "pubmed_web": {
+                    "attempted": pubmed_attempted,
+                    "docs": pubmed_docs_count,
+                    "runtime_ms": web_retrieval_ms,
+                },
                 "status_counts": status_counts,
                 "failed_checks": selected_failed_checks,
                 "failed_checks_all": aggregate_failed_checks,
@@ -630,7 +704,7 @@ def _generate_single_question(
         attempt_history.append(
             {
                 "attempt": attempt,
-                "reason": attempt_reason,
+                "reason": attempt_reason_used,
                 "query": query_used,
                 "evidence_top_k": evidence_top_k,
                 "candidate_count": candidate_count,
@@ -639,6 +713,12 @@ def _generate_single_question(
                 "llm_ms": llm_ms,
                 "verification_ms": verification_ms,
                 "extra_instructions": extra_instructions or "",
+                "retrieval_mode": retrieval_mode,
+                "pubmed_web": {
+                    "attempted": pubmed_attempted,
+                    "docs": pubmed_docs_count,
+                    "runtime_ms": web_retrieval_ms,
+                },
                 "status_counts": status_counts,
                 "failed_checks": selected_failed_checks,
                 "failed_checks_all": aggregate_failed_checks,
@@ -653,6 +733,37 @@ def _generate_single_question(
             break
 
         if attempt < _MAX_ATTEMPTS:
+            if (
+                retrieval_mode != "pubmed_web"
+                and (
+                    "topic_coverage" in selected_failed_checks
+                    or question_result.status == "INSUFFICIENT_EVIDENCE"
+                )
+            ):
+                web_start = time.perf_counter()
+                pubmed_attempted = True
+                pubmed_docs = _fetch_pubmed_fallback(query_used)
+                web_retrieval_ms = (time.perf_counter() - web_start) * 1000.0
+                pubmed_docs_count = len(pubmed_docs)
+                if attempt_logs:
+                    attempt_logs[-1]["pubmed_web"] = {
+                        "attempted": pubmed_attempted,
+                        "docs": pubmed_docs_count,
+                        "runtime_ms": web_retrieval_ms,
+                    }
+                if attempt_history:
+                    attempt_history[-1]["pubmed_web"] = {
+                        "attempted": pubmed_attempted,
+                        "docs": pubmed_docs_count,
+                        "runtime_ms": web_retrieval_ms,
+                    }
+                if pubmed_docs:
+                    override_docs = pubmed_docs
+                    override_reason = "pubmed_web_fallback"
+                    override_retrieval_ms = web_retrieval_ms
+                    attempt_reason = "pubmed_web_fallback"
+                    extra_instructions = None
+                    continue
             if question_result.status == "INSUFFICIENT_EVIDENCE" or (
                 "missing_evidence" in selected_failed_checks
             ):

@@ -60,6 +60,11 @@ class Settings(BaseSettings):
     CORPUS_HF_STREAMING: bool = True
     CORPUS_PUBMED_MAX_DOCS: int = 2000
     CORPUS_TEXTBOOKS_MAX_DOCS: int = 0
+    PUBMED_WEB_ENABLED: bool = False
+    PUBMED_WEB_MAX_RESULTS: int = 10
+    PUBMED_WEB_TIMEOUT_SEC: float = 10.0
+    PUBMED_API_KEY: str = ""
+    PUBMED_EMAIL: str = ""
 
 
 settings = Settings()
