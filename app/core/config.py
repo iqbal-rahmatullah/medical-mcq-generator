@@ -65,6 +65,7 @@ class Settings(BaseSettings):
     PUBMED_WEB_TIMEOUT_SEC: float = 10.0
     PUBMED_API_KEY: str = ""
     PUBMED_EMAIL: str = ""
+    NLI_MODEL: str = "pritamdeka/PubMedBERT-MNLI-MedNLI"
 
 
 settings = Settings()

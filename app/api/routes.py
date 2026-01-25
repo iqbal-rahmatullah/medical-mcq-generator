@@ -7,6 +7,7 @@ from pydantic import TypeAdapter, ValidationError
 
 from app.logging.logger import get_latest_run_record, get_latest_run_summary
 from app.core.config import settings
+from app.eval.nli_eval import evaluate_question_bank_nli
 from app.eval.rouge_eval import evaluate_question_bank
 from app.schemas.request import GenerateRequestItem
 from app.schemas.response import HealthResponse, QuestionItem
@@ -101,4 +102,25 @@ def rouge_eval(
             "very_weak": "ROUGE-L < 0.10",
         },
         "notes": "ROUGE scores computed on stem + correct answer vs evidence span_text (F1 variant).",
+    }
+
+
+@router.get("/eval/nli")
+def nli_eval(limit: int = 0, include_items: bool = False) -> dict:
+    result = evaluate_question_bank_nli(
+        settings.QUESTION_BANK_PATH,
+        model_name=settings.NLI_MODEL,
+        limit=limit,
+        include_items=include_items,
+    )
+    return {
+        "model": settings.NLI_MODEL,
+        "total_seen": result.total_seen,
+        "scored": result.scored,
+        "skipped_status": result.skipped_status,
+        "skipped_no_evidence": result.skipped_no_evidence,
+        "avg_entailment": result.avg_entailment,
+        "label_counts": result.label_counts,
+        "items": result.items,
+        "notes": "NLI scores computed with evidence as premise and stem+answer as hypothesis.",
     }
