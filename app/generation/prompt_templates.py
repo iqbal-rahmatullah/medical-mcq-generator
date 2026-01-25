@@ -41,6 +41,7 @@ Evidence rules:
 Style rules:
 - Do NOT mention evidence, citations, or [E#] in the stem or options.
 - Avoid meta language such as "according to the evidence" or "based on the evidence".
+- Do NOT use source attribution phrases in stems/options (e.g., "according to", "based on", "the study shows", "evidence suggests").
 - Write stems as natural exam-style questions or short clinical vignettes.
 
 Topic: {topic}

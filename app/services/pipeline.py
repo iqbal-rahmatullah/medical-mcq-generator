@@ -21,7 +21,7 @@ from app.generation.prompt_templates import build_prompt
 from app.retrieval.bm25 import BM25Index
 from app.retrieval.medcpt_runtime import MedCPTRuntime
 from app.retrieval.pubmed_web import fetch_pubmed_documents
-from app.retrieval.query_builder import build_query
+from app.retrieval.query_builder import build_query, build_query_minimal
 from app.retrieval.retriever import RetrievalResult, Retriever
 from app.schemas.request import GenerateRequestItem
 from app.schemas.response import Meta, Options, QuestionItem, QuestionStatus
@@ -423,6 +423,7 @@ def _generate_single_question(
         query_used = (query_override or "").strip() or build_query(
             item.topic, item.competency
         )
+        pubmed_query = build_query_minimal(item.topic, item.competency)
         attempt_reason_used = attempt_reason
         retrieval_mode = settings.RETRIEVAL_MODE
         web_retrieval_ms = 0.0
@@ -454,7 +455,7 @@ def _generate_single_question(
             if not retrieval_result.evidence_docs:
                 web_start = time.perf_counter()
                 pubmed_attempted = True
-                pubmed_docs = _fetch_pubmed_fallback(query_used)
+                pubmed_docs = _fetch_pubmed_fallback(pubmed_query)
                 web_retrieval_ms = (time.perf_counter() - web_start) * 1000.0
                 retrieval_ms += web_retrieval_ms
                 pubmed_docs_count = len(pubmed_docs)
@@ -742,7 +743,7 @@ def _generate_single_question(
             ):
                 web_start = time.perf_counter()
                 pubmed_attempted = True
-                pubmed_docs = _fetch_pubmed_fallback(query_used)
+                pubmed_docs = _fetch_pubmed_fallback(pubmed_query)
                 web_retrieval_ms = (time.perf_counter() - web_start) * 1000.0
                 pubmed_docs_count = len(pubmed_docs)
                 if attempt_logs:

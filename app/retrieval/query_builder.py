@@ -194,3 +194,10 @@ def build_query(topic: str, competency: str) -> str:
             terms.append(term)
 
     return " ".join(terms)
+
+
+def build_query_minimal(topic: str, competency: str) -> str:
+    topic = topic.strip()
+    competency = competency.strip()
+    terms = [term for term in (topic, competency) if term]
+    return " ".join(terms)
