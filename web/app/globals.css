@@ -327,6 +327,13 @@ p {
   width: 100%;
 }
 
+.ghost-button.is-compact {
+  width: auto;
+  padding: 8px 12px;
+  font-size: 0.8rem;
+  border-style: solid;
+}
+
 .primary-button {
   border: none;
   border-radius: 12px;
@@ -435,6 +442,123 @@ p {
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+
+.history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.history-entry {
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 18px;
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  box-shadow: var(--shadow);
+}
+
+.history-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.history-title {
+  margin: 0;
+  font-weight: 700;
+  font-size: 0.95rem;
+}
+
+.history-meta {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.history-count {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--accent);
+  background: var(--accent-soft);
+  padding: 4px 10px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.history-topics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+}
+
+.history-entry-link {
+  text-decoration: none;
+  color: inherit;
+  display: block;
+}
+
+.history-entry {
+  transition: border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
+}
+
+.history-entry-link:hover .history-entry {
+  border-color: rgba(29, 107, 255, 0.35);
+  box-shadow: 0 16px 32px rgba(24, 35, 53, 0.12);
+  transform: translateY(-2px);
+}
+
+.history-topic {
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.history-topic-title {
+  margin: 0;
+  font-weight: 700;
+  font-size: 0.88rem;
+}
+
+.history-topic-meta {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.history-details {
+  border-top: 1px dashed var(--border);
+  padding-top: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.history-summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--accent-strong);
+}
+
+.history-summary::marker {
+  color: var(--accent-strong);
+}
+
+.history-empty {
+  font-size: 0.85rem;
+  color: var(--muted);
+  padding: 12px;
+  background: #f9fbff;
+  border: 1px dashed var(--border);
+  border-radius: 12px;
 }
 
 .empty-state {

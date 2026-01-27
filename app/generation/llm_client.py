@@ -52,6 +52,7 @@ class LLMClient:
             settings.LLM_FALLBACKS if fallback_targets_json is None else fallback_targets_json
         )
         self._last_error_kind = ""
+        self._target_offset = 0
 
     def generate_mcq(
         self,
@@ -132,13 +133,20 @@ class LLMClient:
             return None
 
         targets = self._build_targets()
-        for index, target in enumerate(targets):
+        if not targets:
+            return None
+        start_index = self._target_offset % len(targets)
+        for step in range(len(targets)):
+            index = (start_index + step) % len(targets)
+            target = targets[index]
             content = self._dispatch_completion(prompt, target)
             if content:
+                self._target_offset = index
                 return content
             if self._last_error_kind != "rate_limit":
                 return None
-            if index < len(targets) - 1:
+            self._target_offset = (index + 1) % len(targets)
+            if step < len(targets) - 1:
                 LOGGER.warning("Rate limited; falling back to next model/provider")
         return None
 
@@ -577,7 +585,16 @@ def _is_rate_limit_error(exc: Exception) -> bool:
         if code == 429:
             return True
     message = str(exc).lower()
-    return "rate limit" in message or "too many requests" in message or "429" in message
+    return (
+        "rate limit" in message
+        or "too many requests" in message
+        or "429" in message
+        or "quota" in message
+        or "token quota" in message
+        or "tokens per day" in message
+        or "token_quota_exceeded" in message
+        or "too many tokens" in message
+    )
 
 
 def _build_ollama_url(api_base: str) -> str:

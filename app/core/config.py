@@ -66,6 +66,7 @@ class Settings(BaseSettings):
     PUBMED_API_KEY: str = ""
     PUBMED_EMAIL: str = ""
     NLI_MODEL: str = "pritamdeka/PubMedBERT-MNLI-MedNLI"
+    SEMANTIC_MODEL: str = "microsoft/BiomedNLP-PubMedBERT-base-uncased-abstract-fulltext"
 
 
 settings = Settings()

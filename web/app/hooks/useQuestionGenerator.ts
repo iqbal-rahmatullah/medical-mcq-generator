@@ -10,6 +10,7 @@ import type {
   WsEvent,
 } from '../lib/generate'
 import { WS_BASE } from '../lib/config'
+import { appendHistory, createHistoryEntry } from '../lib/history'
 
 export const useQuestionGenerator = (): GeneratorState & {
   generate: (payload: GeneratePayloadItem[]) => void
@@ -22,6 +23,11 @@ export const useQuestionGenerator = (): GeneratorState & {
   const [failedCount, setFailedCount] = useState(0)
   const socketRef = useRef<WebSocket | null>(null)
   const runIdRef = useRef(0)
+  const historyRef = useRef<{
+    entry: ReturnType<typeof createHistoryEntry>
+    stored: boolean
+  } | null>(null)
+  const cancelledRef = useRef(false)
 
   useEffect(() => {
     return () => {
@@ -39,15 +45,29 @@ export const useQuestionGenerator = (): GeneratorState & {
     setLoading(false)
   }
 
+  const finalizeHistory = (storeEmpty: boolean) => {
+    const current = historyRef.current
+    if (!current || current.stored || cancelledRef.current) {
+      return
+    }
+    if (!storeEmpty && current.entry.results.length === 0) {
+      return
+    }
+    current.stored = true
+    appendHistory(current.entry)
+  }
+
   const generate = (payload: GeneratePayloadItem[]) => {
     resetState()
+    cancelledRef.current = false
 
     if (!payload.length) {
-      setError('Topik dan kompetensi wajib diisi.')
+      setError('Topic and competency are required.')
       return
     }
 
     if (socketRef.current) {
+      cancelledRef.current = true
       socketRef.current.close()
     }
 
@@ -60,6 +80,7 @@ export const useQuestionGenerator = (): GeneratorState & {
 
     setLoading(true)
     setProgress({ completed: 0, total: totalQuestions })
+    historyRef.current = { entry: createHistoryEntry(payload), stored: false }
 
     const socket = new WebSocket(`${WS_BASE}/ws/generate`)
     socketRef.current = socket
@@ -85,6 +106,7 @@ export const useQuestionGenerator = (): GeneratorState & {
 
       if (data.type === 'question') {
         setResults((prev) => [...prev, data.question])
+        historyRef.current?.entry.results.push(data.question)
       }
 
       if (data.type === 'question_failed') {
@@ -105,6 +127,7 @@ export const useQuestionGenerator = (): GeneratorState & {
 
       if (data.type === 'done') {
         setLoading(false)
+        finalizeHistory(true)
         socket.close()
       }
     }
@@ -121,12 +144,14 @@ export const useQuestionGenerator = (): GeneratorState & {
       if (currentRunId !== runIdRef.current) {
         return
       }
+      finalizeHistory(false)
       setLoading(false)
     }
   }
 
   const cancel = () => {
     runIdRef.current += 1
+    cancelledRef.current = true
     if (socketRef.current) {
       socketRef.current.close()
       socketRef.current = null

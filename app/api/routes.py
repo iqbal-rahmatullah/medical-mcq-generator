@@ -9,6 +9,7 @@ from app.logging.logger import get_latest_run_record, get_latest_run_summary
 from app.core.config import settings
 from app.eval.nli_eval import evaluate_question_bank_nli
 from app.eval.rouge_eval import evaluate_question_bank
+from app.eval.semantic_eval import evaluate_question_bank_semantic
 from app.schemas.request import GenerateRequestItem
 from app.schemas.response import HealthResponse, QuestionItem
 from app.services.pipeline import build_failure_batch, run_pipeline_batch, run_pipeline_stream
@@ -92,6 +93,7 @@ def rouge_eval(
         "skipped_no_evidence": result.skipped_no_evidence,
         "avg_rouge1_f1": result.avg_rouge1_f1,
         "avg_rougeL_f1": result.avg_rougeL_f1,
+        "avg_rouge_f1": (result.avg_rouge1_f1 + result.avg_rougeL_f1) / 2,
         "categories": result.categories,
         "items": result.items,
         "filter_category": category,
@@ -101,7 +103,7 @@ def rouge_eval(
             "weak": "0.10 <= ROUGE-L < 0.20",
             "very_weak": "ROUGE-L < 0.10",
         },
-        "notes": "ROUGE scores computed on stem + correct answer vs evidence span_text (F1 variant).",
+        "notes": "ROUGE scores computed on stem + correct answer vs evidence span_text.",
     }
 
 
@@ -123,4 +125,37 @@ def nli_eval(limit: int = 0, include_items: bool = False) -> dict:
         "label_counts": result.label_counts,
         "items": result.items,
         "notes": "NLI scores computed with evidence as premise and stem+answer as hypothesis.",
+    }
+
+
+@router.get("/eval/semantic")
+def semantic_eval(
+    limit: int = 0,
+    include_items: bool = False,
+    category: str | None = None,
+) -> dict:
+    result = evaluate_question_bank_semantic(
+        settings.QUESTION_BANK_PATH,
+        model_name=settings.SEMANTIC_MODEL,
+        limit=limit,
+        include_items=include_items,
+        filter_category=category,
+    )
+    return {
+        "model": settings.SEMANTIC_MODEL,
+        "total_seen": result.total_seen,
+        "scored": result.scored,
+        "skipped_status": result.skipped_status,
+        "skipped_no_evidence": result.skipped_no_evidence,
+        "avg_cosine_similarity": result.avg_cosine,
+        "categories": result.categories,
+        "items": result.items,
+        "filter_category": category,
+        "rubric": {
+            "strong": "cosine >= 0.70",
+            "moderate": "0.50 <= cosine < 0.70",
+            "weak": "0.30 <= cosine < 0.50",
+            "very_weak": "cosine < 0.30",
+        },
+        "notes": "Semantic similarity computed on stem + correct answer vs evidence span_text.",
     }
