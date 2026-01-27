@@ -49,6 +49,14 @@ def verify_questions(
     reviewer: Optional[ReviewerClient] = None,
     run_reviewer: bool = True,
 ) -> List[VerificationResult]:
+    if not isinstance(questions, list):
+        questions = list(questions)
+    LOGGER.info(
+        "\nVerification start: questions=%s reviewer_enabled=%s evidence_docs=%s",
+        len(questions),
+        bool(run_reviewer and reviewer is not None),
+        len(evidence_docs),
+    )
     results: List[VerificationResult] = []
     doc_lookup = {doc.doc_id: doc for doc in evidence_docs}
     adapter = TypeAdapter(QuestionItem)
@@ -80,12 +88,37 @@ def verify_questions(
                 )
                 decision = reviewer.review(question, evidence_text)
                 if decision == "INSUFFICIENT":
+                    LOGGER.warning(
+                        "\nReviewer failed: reason=insufficient provider=%s model=%s topic=%s competency=%s answer_key=%s",
+                        settings.REVIEWER_PROVIDER or settings.LLM_PROVIDER,
+                        settings.REVIEWER_MODEL or settings.LLM_MODEL,
+                        question.topic,
+                        question.competency,
+                        question.answer_key,
+                    )
                     failed_checks.append("reviewer_insufficient")
                     notes.append("reviewer returned INSUFFICIENT")
                 elif decision != question.answer_key:
+                    LOGGER.warning(
+                        "\nReviewer failed: reason=mismatch provider=%s model=%s topic=%s competency=%s expected=%s got=%s",
+                        settings.REVIEWER_PROVIDER or settings.LLM_PROVIDER,
+                        settings.REVIEWER_MODEL or settings.LLM_MODEL,
+                        question.topic,
+                        question.competency,
+                        question.answer_key,
+                        decision,
+                    )
                     failed_checks.append("reviewer_mismatch")
                     notes.append(f"reviewer={decision} expected={question.answer_key}")
             except Exception as exc:
+                LOGGER.warning(
+                    "\nReviewer error: provider=%s model=%s topic=%s competency=%s error=%s",
+                    settings.REVIEWER_PROVIDER or settings.LLM_PROVIDER,
+                    settings.REVIEWER_MODEL or settings.LLM_MODEL,
+                    question.topic,
+                    question.competency,
+                    exc,
+                )
                 failed_checks.append("reviewer_error")
                 notes.append(str(exc))
 

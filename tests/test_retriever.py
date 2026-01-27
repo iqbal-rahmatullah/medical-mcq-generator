@@ -11,31 +11,52 @@ def _make_docs() -> list[Document]:
             doc_id="d1",
             source="test",
             title="Diabetes diagnosis",
-            text="Symptoms include polyuria and polydipsia.",
+            text=(
+                "Background: Type 2 diabetes mellitus is often asymptomatic early. "
+                "Symptoms include polyuria, polydipsia, and weight loss. "
+                "Diagnosis is confirmed by fasting plasma glucose, HbA1c, or oral glucose tolerance test. "
+                "Key findings can include elevated HbA1c and random glucose >200 mg/dL with symptoms."
+            ),
         ),
         Document(
             doc_id="d2",
             source="test",
             title="Hypertension management",
-            text="Lifestyle modification remains first-line therapy.",
+            text=(
+                "Guidelines recommend lifestyle modification and pharmacotherapy. "
+                "First-line agents include thiazide diuretics, ACE inhibitors, ARBs, and calcium channel blockers. "
+                "Monitor blood pressure, renal function, and electrolytes."
+            ),
         ),
         Document(
             doc_id="d3",
             source="test",
             title="Asthma exacerbation",
-            text="Triggers include allergens and infections.",
+            text=(
+                "Acute exacerbations are triggered by viral infections, allergens, and irritants. "
+                "Symptoms include wheeze, dyspnea, and cough with reduced peak flow. "
+                "Management includes SABA, systemic corticosteroids, and oxygen if needed."
+            ),
         ),
         Document(
             doc_id="d4",
             source="test",
             title="Diabetes treatment",
-            text="Metformin improves insulin sensitivity.",
+            text=(
+                "Metformin is first-line pharmacotherapy for type 2 diabetes and improves insulin sensitivity. "
+                "Consider GLP-1 receptor agonists or SGLT2 inhibitors for cardiovascular benefit. "
+                "Monitor HbA1c every 3-6 months."
+            ),
         ),
         Document(
             doc_id="d5",
             source="test",
             title="Thyroid disorders",
-            text="Hypothyroidism causes fatigue and weight gain.",
+            text=(
+                "Hypothyroidism can cause fatigue, weight gain, and cold intolerance. "
+                "Diagnosis is supported by elevated TSH and low free T4. "
+                "Treatment is levothyroxine with TSH monitoring."
+            ),
         ),
     ]
 

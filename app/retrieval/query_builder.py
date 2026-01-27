@@ -4,6 +4,7 @@ from typing import Dict, List
 
 
 _COMPETENCY_EXPANSIONS: Dict[str, List[str]] = {
+    # Diagnosis: gejala, tanda, rangkaian pemeriksaan, dan tes diagnostik.
     "diagnosis": [
         "diagnosis",
         "differential diagnosis",
@@ -19,6 +20,7 @@ _COMPETENCY_EXPANSIONS: Dict[str, List[str]] = {
         "laboratory findings",
         "imaging",
     ],
+    # Treatment: terapi, obat, dosis, serta penanganan saat kondisi akut dan jangka panjang.
     "treatment": [
         "treatment",
         "therapy",
@@ -34,21 +36,7 @@ _COMPETENCY_EXPANSIONS: Dict[str, List[str]] = {
         "acute management",
         "long-term management",
     ],
-    "therapy": [
-        "therapy",
-        "treatment",
-        "management",
-        "drug",
-        "dosage",
-        "medication",
-        "pharmacotherapy",
-        "first-line",
-        "second-line",
-        "guideline",
-        "intervention",
-        "acute management",
-        "long-term management",
-    ],
+    # Etiology: penyebab, faktor risiko, dan proses penyakit berkembang.
     "etiology": [
         "etiology",
         "cause",
@@ -63,6 +51,7 @@ _COMPETENCY_EXPANSIONS: Dict[str, List[str]] = {
         "epidemiology",
         "incidence",
     ],
+    # Prevention: pencegahan, pengurangan risiko, skrining, dan upaya pencegahan untuk publik.
     "prevention": [
         "prevention",
         "prophylaxis",
@@ -77,6 +66,7 @@ _COMPETENCY_EXPANSIONS: Dict[str, List[str]] = {
         "early detection",
         "follow-up",
     ],
+    # Prognosis: luaran, angka kematian, kekambuhan, dan derajat keparahan.
     "prognosis": [
         "prognosis",
         "outcomes",
@@ -91,6 +81,7 @@ _COMPETENCY_EXPANSIONS: Dict[str, List[str]] = {
         "quality of life",
         "predictors",
     ],
+    # Screening: deteksi dini, performa tes, dan panduan skrining.
     "screening": [
         "screening",
         "early detection",
@@ -105,6 +96,7 @@ _COMPETENCY_EXPANSIONS: Dict[str, List[str]] = {
         "follow-up",
         "diagnostic threshold",
     ],
+    # Complications: luaran buruk dan kondisi yang makin memburuk.
     "complications": [
         "complications",
         "adverse outcomes",
@@ -119,6 +111,7 @@ _COMPETENCY_EXPANSIONS: Dict[str, List[str]] = {
         "severity",
         "clinical deterioration",
     ],
+    # Pathophysiology: mekanisme, jalur biologis, dan penanda di tubuh.
     "pathophysiology": [
         "pathophysiology",
         "pathogenesis",
@@ -133,6 +126,7 @@ _COMPETENCY_EXPANSIONS: Dict[str, List[str]] = {
         "dysfunction",
         "disease process",
     ],
+    # Pharmacology: mekanisme obat, dosis, efek samping, dan keamanan.
     "pharmacology": [
         "pharmacology",
         "drug mechanism",
@@ -147,6 +141,7 @@ _COMPETENCY_EXPANSIONS: Dict[str, List[str]] = {
         "toxicity",
         "therapeutic target",
     ],
+    # Monitoring: follow-up, respons terapi, dan pemantauan efek.
     "monitoring": [
         "monitoring",
         "follow-up",
@@ -161,6 +156,7 @@ _COMPETENCY_EXPANSIONS: Dict[str, List[str]] = {
         "clinical assessment",
         "outcome tracking",
     ],
+    # Investigation: pemeriksaan diagnostik, rangkaian pemeriksaan, dan akurasi tes.
     "investigation": [
         "investigation",
         "diagnostic test",

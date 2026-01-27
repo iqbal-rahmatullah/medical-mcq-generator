@@ -13,7 +13,6 @@ _TOKEN_RE = re.compile(r"[a-z0-9]+")
 def _tokenize(text: str) -> List[str]:
     return _TOKEN_RE.findall(text.lower())
 
-
 @dataclass(frozen=True)
 class BM25Config:
     k1: float = 1.5

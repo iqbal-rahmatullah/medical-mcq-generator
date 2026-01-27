@@ -197,6 +197,22 @@ def _normalize_stem(value: str) -> str:
     return " ".join(value.strip().lower().split())
 
 
+def _truncate_log(value: str, limit: int = 160) -> str:
+    cleaned = value.strip()
+    if len(cleaned) <= limit:
+        return cleaned
+    return f"{cleaned[:limit - 3].rstrip()}..."
+
+
+def _format_doc_ids(doc_ids: List[str], limit: int = 4) -> str:
+    if not doc_ids:
+        return "none"
+    head = ", ".join(doc_ids[:limit])
+    if len(doc_ids) <= limit:
+        return head
+    return f"{head}, ... (+{len(doc_ids) - limit})"
+
+
 def _matches_topic_competency(
     question: QuestionItem, topic: str, competency: str
 ) -> bool:
@@ -430,6 +446,16 @@ def _generate_single_question(
         pubmed_attempted = False
         pubmed_docs_count = 0
 
+        LOGGER.info(
+            "\nAttempt start: topic=%s competency=%s attempt=%s reason=%s evidence_top_k=%s query=%s",
+            item.topic,
+            item.competency,
+            attempt,
+            attempt_reason_used,
+            evidence_top_k,
+            _truncate_log(query_used),
+        )
+
         if override_docs is not None:
             retrieval_mode = "pubmed_web"
             attempt_reason_used = override_reason or attempt_reason
@@ -473,7 +499,29 @@ def _generate_single_question(
                         fused_doc_ids=[doc.doc_id for doc in pubmed_docs],
                     )
 
+        LOGGER.info(
+            "\nRetrieval done: topic=%s competency=%s attempt=%s mode=%s ms=%.1f evidence_docs=%s bm25=%s dense=%s fused=%s pubmed_attempted=%s pubmed_docs=%s",
+            item.topic,
+            item.competency,
+            attempt,
+            retrieval_mode,
+            retrieval_ms,
+            len(retrieval_result.evidence_docs),
+            len(retrieval_result.bm25_doc_ids),
+            len(retrieval_result.dense_doc_ids),
+            len(retrieval_result.fused_doc_ids),
+            pubmed_attempted,
+            pubmed_docs_count,
+        )
+
         if not retrieval_result.evidence_docs:
+            LOGGER.warning(
+                "\nRetrieval empty: topic=%s competency=%s attempt=%s reason=%s",
+                item.topic,
+                item.competency,
+                attempt,
+                attempt_reason_used,
+            )
             attempt_logs.append(
                 {
                     "attempt": attempt,
@@ -575,6 +623,15 @@ def _generate_single_question(
             if extracted_docs:
                 evidence_docs_for_prompt = extracted_docs
         evidence_doc_ids = [doc.doc_id for doc in evidence_docs_for_prompt]
+        LOGGER.info(
+            "\nPrompt evidence: topic=%s competency=%s attempt=%s docs=%s reused=%s ids=%s",
+            item.topic,
+            item.competency,
+            attempt,
+            len(evidence_docs_for_prompt),
+            evidence_reused,
+            _format_doc_ids(evidence_doc_ids),
+        )
         dedupe_instruction = _build_dedupe_instruction(avoid_stems)
         combined_instructions = _merge_instructions(extra_instructions, dedupe_instruction)
         evidence_text = render_evidence(
@@ -583,6 +640,13 @@ def _generate_single_question(
             max_total_chars=settings.EVIDENCE_MAX_TOTAL_CHARS,
         )
         candidate_count = _CANDIDATES_PER_ATTEMPT
+        LOGGER.info(
+            "\nLLM generate: topic=%s competency=%s attempt=%s candidates=%s",
+            item.topic,
+            item.competency,
+            attempt,
+            candidate_count,
+        )
         prompt = build_prompt(
             item.topic,
             item.competency,
@@ -670,6 +734,15 @@ def _generate_single_question(
             aggregate_failed_checks = sorted(
                 set(aggregate_failed_checks) | {"duplicate_question"}
             )
+        LOGGER.info(
+            "\nVerification summary: topic=%s competency=%s attempt=%s status_counts=%s failed_checks=%s selected_failed=%s",
+            item.topic,
+            item.competency,
+            attempt,
+            status_counts,
+            aggregate_failed_checks,
+            selected_failed_checks,
+        )
         attempt_logs.append(
             {
                 "attempt": attempt,
@@ -862,6 +935,14 @@ def run_pipeline_stream(
         "timestamp": run_timestamp,
         "total_questions": total_questions,
     }
+    LOGGER.info(
+        "\nRun start: run_id=%s items=%s total_questions=%s ok_only=%s retrieval_mode=%s",
+        run_id,
+        len(payload),
+        total_questions,
+        ok_only_mode,
+        settings.RETRIEVAL_MODE,
+    )
 
     def build_question_event(
         question: QuestionItem, item_index: int, question_index: int
@@ -897,6 +978,14 @@ def run_pipeline_stream(
         used_stems: List[str] = []
 
         try:
+            LOGGER.info(
+                "\nItem start: run_id=%s item_index=%s topic=%s competency=%s n_questions=%s",
+                run_id,
+                item_index,
+                item.topic,
+                item.competency,
+                item.n_questions,
+            )
             if item.n_questions < 1:
                 raise ValueError("n_questions must be >= 1")
 
@@ -911,6 +1000,9 @@ def run_pipeline_stream(
                     pending_normalized: set[str] = set()
                     item_failed = False
                     if not settings.QUESTION_BANK_FALLBACK:
+                        LOGGER.error(
+                            "generation_failed: retriever_unavailable and question bank fallback disabled"
+                        )
                         item_failed = True
                         remaining = item.n_questions
                         for _ in range(remaining):
@@ -943,6 +1035,11 @@ def run_pipeline_stream(
                                 settings.QUESTION_BANK_ALLOW_ANY_TOPIC,
                             )
                             if fallback_question is None:
+                                LOGGER.error(
+                                    "generation_failed: question bank fallback missing for topic=%s competency=%s",
+                                    item.topic,
+                                    item.competency,
+                                )
                                 item_failed = True
                                 remaining = item.n_questions - question_index + 1
                                 for _ in range(remaining):
@@ -1045,6 +1142,14 @@ def run_pipeline_stream(
                             if normalized_stem and (
                                 normalized_stem in run_used_normalized
                             ):
+                                LOGGER.info(
+                                    "\nDedup hit (ok_only): topic=%s competency=%s round=%s dedup_attempt=%s stem=%s",
+                                    item.topic,
+                                    item.competency,
+                                    ok_round,
+                                    dedup_attempt,
+                                    _truncate_log(question.stem or ""),
+                                )
                                 verification_meta = dict(
                                     question.meta.verification or {}
                                 )
@@ -1087,6 +1192,11 @@ def run_pipeline_stream(
                             question = fallback_question
                             normalized_stem = _normalize_stem(question.stem or "")
                         else:
+                            LOGGER.error(
+                                "generation_failed: OK-only attempts exhausted for topic=%s competency=%s",
+                                item.topic,
+                                item.competency,
+                            )
                             item_failed = True
                             remaining = item.n_questions - question_index + 1
                             for _ in range(remaining):
@@ -1160,6 +1270,13 @@ def run_pipeline_stream(
                         item_attempts.append(log)
                     normalized_stem = _normalize_stem(question.stem or "")
                     if normalized_stem and normalized_stem in run_used_normalized:
+                        LOGGER.info(
+                            "\nDedup hit: topic=%s competency=%s dedup_attempt=%s stem=%s",
+                            item.topic,
+                            item.competency,
+                            dedup_attempt,
+                            _truncate_log(question.stem or ""),
+                        )
                         verification_meta = dict(question.meta.verification or {})
                         verification_meta.setdefault("error", "duplicate_question")
                         verification_meta["duplicate"] = True
@@ -1203,6 +1320,7 @@ def run_pipeline_stream(
                     bank_questions.append(question)
                     bank_normalized.add(normalized_stem)
         except ValueError as exc:
+            LOGGER.warning("pipeline validation error: %s", exc)
             failure_questions = build_failure_batch(
                 [item], str(exc), status="FAILED_VERIFICATION"
             )
@@ -1227,6 +1345,7 @@ def run_pipeline_stream(
                         "total_questions": total_questions,
                     }
         except Exception as exc:
+            LOGGER.exception("pipeline error: %s", exc)
             failure_questions = build_failure_batch(
                 [item], f"pipeline_error: {exc}", status="FAILED_VERIFICATION"
             )
@@ -1284,6 +1403,13 @@ def run_pipeline_stream(
         "total_questions": total_questions,
         "summary": summary_out,
     }
+    LOGGER.info(
+        "\nRun done: run_id=%s completed=%s total=%s runtime_ms=%.1f",
+        run_id,
+        completed,
+        total_questions,
+        (time.perf_counter() - run_started) * 1000.0,
+    )
 
 
 def run_pipeline_batch(payload: List[GenerateRequestItem]) -> List[QuestionItem]:

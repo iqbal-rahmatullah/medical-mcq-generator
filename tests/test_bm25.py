@@ -10,61 +10,102 @@ def _make_docs() -> list[Document]:
             doc_id="d1",
             source="test",
             title="Diabetes diagnosis",
-            text="Symptoms include polyuria and polydipsia.",
+            text=(
+                "Background: Type 2 diabetes mellitus is often asymptomatic early. "
+                "Symptoms include polyuria, polydipsia, and weight loss. "
+                "Diagnosis is confirmed by fasting plasma glucose, HbA1c, or oral glucose tolerance test. "
+                "Key findings can include elevated HbA1c and random glucose >200 mg/dL with symptoms."
+            ),
         ),
         Document(
             doc_id="d2",
             source="test",
             title="Hypertension management",
-            text="First-line therapy includes lifestyle modification.",
+            text=(
+                "Guidelines recommend lifestyle modification and pharmacotherapy. "
+                "First-line agents include thiazide diuretics, ACE inhibitors, ARBs, and calcium channel blockers. "
+                "Monitor blood pressure, renal function, and electrolytes."
+            ),
         ),
         Document(
             doc_id="d3",
             source="test",
             title="Asthma exacerbation",
-            text="Triggers include allergens and viral infections.",
+            text=(
+                "Acute exacerbations are triggered by viral infections, allergens, and irritants. "
+                "Symptoms include wheeze, dyspnea, and cough with reduced peak flow. "
+                "Management includes SABA, systemic corticosteroids, and oxygen if needed."
+            ),
         ),
         Document(
             doc_id="d4",
             source="test",
             title="Diabetes treatment",
-            text="Metformin improves insulin sensitivity.",
+            text=(
+                "Metformin is first-line pharmacotherapy for type 2 diabetes and improves insulin sensitivity. "
+                "Consider GLP-1 receptor agonists or SGLT2 inhibitors for cardiovascular benefit. "
+                "Monitor HbA1c every 3-6 months."
+            ),
         ),
         Document(
             doc_id="d5",
             source="test",
             title="Chronic kidney disease",
-            text="Stages are based on eGFR.",
+            text=(
+                "Chronic kidney disease staging is based on eGFR and albuminuria. "
+                "Complications include anemia, bone mineral disorder, and cardiovascular disease. "
+                "Management includes blood pressure control and avoidance of nephrotoxins."
+            ),
         ),
         Document(
             doc_id="d6",
             source="test",
             title="Myocardial infarction",
-            text="Chest pain and ECG changes are key findings.",
+            text=(
+                "Presentation includes chest pain, diaphoresis, and nausea. "
+                "ECG changes and elevated troponin support diagnosis. "
+                "Acute management includes antiplatelets, anticoagulation, and reperfusion therapy."
+            ),
         ),
         Document(
             doc_id="d7",
             source="test",
             title="Anemia workup",
-            text="Microcytic anemia suggests iron deficiency.",
+            text=(
+                "Workup includes CBC, reticulocyte count, iron studies, and peripheral smear. "
+                "Microcytic anemia suggests iron deficiency or thalassemia. "
+                "Assess for sources of blood loss."
+            ),
         ),
         Document(
             doc_id="d8",
             source="test",
             title="Thyroid disorders",
-            text="Hypothyroidism causes fatigue and weight gain.",
+            text=(
+                "Hypothyroidism can cause fatigue, weight gain, and cold intolerance. "
+                "Diagnosis is supported by elevated TSH and low free T4. "
+                "Treatment is levothyroxine with TSH monitoring."
+            ),
         ),
         Document(
             doc_id="d9",
             source="test",
             title="Pneumonia",
-            text="Common pathogens include Streptococcus pneumoniae.",
+            text=(
+                "Community-acquired pneumonia often presents with cough, fever, and sputum production. "
+                "Common pathogens include Streptococcus pneumoniae and atypicals. "
+                "Diagnosis may include chest imaging and sputum studies."
+            ),
         ),
         Document(
             doc_id="d10",
             source="test",
             title="Sepsis",
-            text="Early recognition improves outcomes.",
+            text=(
+                "Sepsis is life-threatening organ dysfunction caused by infection. "
+                "Early recognition and prompt antibiotics improve outcomes. "
+                "Management includes fluid resuscitation and source control."
+            ),
         ),
     ]
 

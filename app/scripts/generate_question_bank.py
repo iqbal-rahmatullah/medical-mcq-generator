@@ -80,7 +80,6 @@ TOPICS = [
 COMPETENCIES = [
     "Diagnosis",
     "Treatment",
-    "Therapy",
     "Etiology",
     "Prevention",
     "Prognosis",

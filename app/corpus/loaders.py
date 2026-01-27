@@ -29,7 +29,7 @@ def load_pubmed_jsonl(path: str) -> Iterator[Document]:
             payload = json.loads(line)
             doc_id = normalize_text(str(payload.get("doc_id", "")))
             title = normalize_text(str(payload.get("title", "")))
-            body = payload.get("content") or payload.get("contents") or ""
+            body = payload.get("contents") or payload.get("content") or ""
             body = normalize_text(str(body))
             text = body or title
             if not doc_id:
@@ -51,7 +51,7 @@ def load_textbooks_jsonl(path: str) -> Iterator[Document]:
             payload = json.loads(line)
             doc_id = normalize_text(str(payload.get("doc_id", "")))
             title = normalize_text(str(payload.get("title", "")))
-            body = payload.get("text") or payload.get("content") or payload.get("contents") or payload.get("snippet") or ""
+            body =   payload.get("contents") or payload.get("content") or payload.get("snippet") or payload.get("text") or ""
             body = normalize_text(str(body))
             text = normalize_text(" ".join(part for part in [title, body] if part))
             if not doc_id:

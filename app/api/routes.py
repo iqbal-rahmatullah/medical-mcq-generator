@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import List
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
@@ -15,6 +16,7 @@ from app.schemas.response import HealthResponse, QuestionItem
 from app.services.pipeline import build_failure_batch, run_pipeline_batch, run_pipeline_stream
 
 router = APIRouter()
+LOGGER = logging.getLogger(__name__)
 
 
 @router.get("/health", response_model=HealthResponse)
@@ -57,6 +59,7 @@ async def generate_questions_ws(websocket: WebSocket) -> None:
     except WebSocketDisconnect:
         return
     except Exception as exc:
+        LOGGER.exception("WebSocket pipeline error: %s", exc)
         await websocket.send_json({"type": "error", "message": f"pipeline_error: {exc}"})
     finally:
         try:

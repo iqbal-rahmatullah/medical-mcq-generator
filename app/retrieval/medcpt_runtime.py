@@ -80,7 +80,7 @@ class MedCPTRuntime:
             query_vec = self.encode_query(query)
             if query_vec.size == 0:
                 return [0.0 for _ in docs]
-        except Exception as exc:  # pragma: no cover - defensive path
+        except Exception as exc: 
             LOGGER.exception("Failed to encode query: %s", exc)
             return [0.0 for _ in docs]
 
@@ -100,7 +100,7 @@ class MedCPTRuntime:
         if unique_texts:
             try:
                 doc_embeddings = self.encode_docs(unique_texts)
-            except Exception as exc:  # pragma: no cover - defensive path
+            except Exception as exc: 
                 LOGGER.exception("Failed to encode documents: %s", exc)
                 return [0.0 for _ in docs]
 

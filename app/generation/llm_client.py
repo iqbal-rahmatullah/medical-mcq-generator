@@ -140,14 +140,66 @@ class LLMClient:
             index = (start_index + step) % len(targets)
             target = targets[index]
             content = self._dispatch_completion(prompt, target)
+            if content is None:
+                LOGGER.warning(
+                    "LLM request failed: provider=%s model=%s key=%s kind=%s",
+                    target.get("provider"),
+                    target.get("model"),
+                    _mask_key(
+                        _select_log_key(
+                            target.get("provider"),
+                            target.get("api_key"),
+                            target.get("groq_api_key"),
+                            target.get("cerebras_api_key"),
+                        )
+                    ),
+                    self._last_error_kind or "unknown",
+                )
             if content:
+                LOGGER.info(
+                    "LLM request success: provider=%s model=%s key=%s",
+                    target.get("provider"),
+                    target.get("model"),
+                    _mask_key(
+                        _select_log_key(
+                            target.get("provider"),
+                            target.get("api_key"),
+                            target.get("groq_api_key"),
+                            target.get("cerebras_api_key"),
+                        )
+                    ),
+                )
                 self._target_offset = index
                 return content
             if self._last_error_kind != "rate_limit":
                 return None
-            self._target_offset = (index + 1) % len(targets)
+            next_index = (index + 1) % len(targets)
+            self._target_offset = next_index
             if step < len(targets) - 1:
-                LOGGER.warning("Rate limited; falling back to next model/provider")
+                next_target = targets[next_index]
+                LOGGER.warning(
+                    "Rate limited; falling back from provider=%s model=%s key=%s to provider=%s model=%s key=%s",
+                    target.get("provider"),
+                    target.get("model"),
+                    _mask_key(
+                        _select_log_key(
+                            target.get("provider"),
+                            target.get("api_key"),
+                            target.get("groq_api_key"),
+                            target.get("cerebras_api_key"),
+                        )
+                    ),
+                    next_target.get("provider"),
+                    next_target.get("model"),
+                    _mask_key(
+                        _select_log_key(
+                            next_target.get("provider"),
+                            next_target.get("api_key"),
+                            next_target.get("groq_api_key"),
+                            next_target.get("cerebras_api_key"),
+                        )
+                    ),
+                )
         return None
 
     def _build_targets(self) -> List[Dict[str, Optional[str]]]:
@@ -187,6 +239,12 @@ class LLMClient:
         groq_api_key = target.get("groq_api_key") or ""
         cerebras_api_key = target.get("cerebras_api_key") or ""
         self._last_error_kind = ""
+        LOGGER.info(
+            "LLM request start: provider=%s model=%s key=%s",
+            provider,
+            model,
+            _mask_key(_select_log_key(provider, api_key, groq_api_key, cerebras_api_key)),
+        )
 
         if provider in ("ollama",):
             return self._ollama_generate(prompt, model=model, api_base=api_base)
@@ -566,6 +624,29 @@ def _parse_fallbacks(value: str) -> List[Dict[str, str]]:
             }
         )
     return cleaned
+
+
+def _mask_key(value: Optional[str]) -> str:
+    raw = (value or "").strip()
+    if not raw:
+        return "none"
+    if len(raw) <= 8:
+        return "*" * len(raw)
+    return f"{raw[:4]}...{raw[-4:]}"
+
+
+def _select_log_key(
+    provider: Optional[str],
+    api_key: Optional[str],
+    groq_api_key: Optional[str],
+    cerebras_api_key: Optional[str],
+) -> Optional[str]:
+    normalized = (provider or "").strip().lower()
+    if normalized in ("groq", "groq_sdk", "groq_cloud"):
+        return groq_api_key or api_key
+    if normalized in ("cerebras", "cerebras_sdk", "cerebras_cloud"):
+        return cerebras_api_key or api_key
+    return api_key
 
 
 def _classify_error(exc: Exception) -> str:
