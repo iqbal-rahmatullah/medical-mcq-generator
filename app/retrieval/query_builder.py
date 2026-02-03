@@ -193,3 +193,29 @@ def build_query_minimal(topic: str, competency: str) -> str:
     competency = competency.strip()
     terms = [term for term in (topic, competency) if term]
     return " ".join(terms)
+
+
+_QUERY_VARIATIONS = [
+    ["clinical", "medical", "practice", "patient"],
+    ["evidence", "study", "research", "findings"],
+    ["diagnosis", "treatment", "management", "therapy"],
+    ["pathophysiology", "mechanism", "cause", "etiology"],
+    ["symptoms", "signs", "presentation", "manifestation"],
+]
+
+
+def build_query_varied(topic: str, competency: str, variation_index: int = 0) -> str:
+    base_query = build_query(topic, competency)
+    
+    idx = variation_index % len(_QUERY_VARIATIONS)
+    variation_terms = _QUERY_VARIATIONS[idx]
+    
+    base_lower = base_query.lower()
+    new_terms = [t for t in variation_terms if t.lower() not in base_lower]
+    
+    if not new_terms:
+        return base_query
+    
+    selected = new_terms[:2]
+    return f"{base_query} {' '.join(selected)}"
+

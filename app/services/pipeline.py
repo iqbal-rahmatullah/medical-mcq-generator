@@ -21,7 +21,7 @@ from app.generation.prompt_templates import build_prompt
 from app.retrieval.bm25 import BM25Index
 from app.retrieval.medcpt_runtime import MedCPTRuntime
 from app.retrieval.pubmed_web import fetch_pubmed_documents
-from app.retrieval.query_builder import build_query, build_query_minimal
+from app.retrieval.query_builder import build_query, build_query_minimal, build_query_varied
 from app.retrieval.retriever import RetrievalResult, Retriever
 from app.schemas.request import GenerateRequestItem
 from app.schemas.response import Meta, Options, QuestionItem, QuestionStatus
@@ -434,6 +434,7 @@ def _generate_single_question(
     track_doc_ids = used_doc_ids is not None
     doc_id_tracker = used_doc_ids if used_doc_ids is not None else set()
     final_evidence_doc_ids: List[str] = []
+    v2_requote_count = 0  # Track consecutive v2_requote attempts
 
     for attempt in range(1, _MAX_ATTEMPTS + 1):
         query_used = (query_override or "").strip() or build_query(
@@ -860,8 +861,23 @@ def _generate_single_question(
                 attempt_reason = "v4_json_strict"
                 continue
             if any(check in _V2_FAILED_CHECKS for check in selected_failed_checks):
+                v2_requote_count += 1
                 extra_instructions = _REQUOTE_INSTRUCTION
-                attempt_reason = "v2_requote"
+                # Setelah 2 kali v2_requote gagal, gunakan query variation
+                if v2_requote_count >= 2:
+                    query_override = build_query_varied(
+                        item.topic, item.competency, variation_index=v2_requote_count - 2
+                    )
+                    attempt_reason = "v2_requote_varied"
+                    LOGGER.info(
+                        "\nQuery variation applied: topic=%s competency=%s v2_count=%s query=%s",
+                        item.topic,
+                        item.competency,
+                        v2_requote_count,
+                        _truncate_log(query_override),
+                    )
+                else:
+                    attempt_reason = "v2_requote"
                 continue
             if any(
                 check in ("reviewer_mismatch", "reviewer_insufficient")
