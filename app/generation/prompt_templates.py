@@ -2,117 +2,154 @@ from __future__ import annotations
 
 from typing import Optional
 
-# Few-shot examples
+# Few-shot examples dengan multiple format variations
 FEW_SHOT_EXAMPLES = {
     "basic_sciences": """
-EXAMPLE MCQ (Basic Sciences):
+EXAMPLE MCQs (Basic Sciences) - Use varied formats like these:
+
+Format 1 - Direct Question:
 {
-  "topic": "Enzyme Kinetics",
-  "competency": "basic_sciences",
-  "stem": "A researcher is studying an enzyme that follows Michaelis-Menten kinetics. When the substrate concentration equals the Km value, what percentage of the enzyme's maximum velocity (Vmax) is achieved?",
-  "options": {
-    "A": "25%",
-    "B": "50%",
-    "C": "75%",
-    "D": "100%"
-  },
-  "answer_key": "B",
-  "explanation": "When [S] = Km, the Michaelis-Menten equation simplifies to V = Vmax/2. This is because at [S] = Km, the enzyme is operating at half of its maximum velocity, which represents 50% of Vmax.",
-  "evidence": [{"source": "textbook", "doc_id": "enzyme_001", "title": "Biochemistry", "span_text": "The Michaelis constant Km is defined as the substrate concentration at which the reaction velocity is half of Vmax."}],
-  "status": "OK"
+  "stem": "What is the primary function of the Na+/K+-ATPase pump in maintaining cellular homeostasis?",
+  "options": {"A": "Generate action potentials", "B": "Maintain resting membrane potential", "C": "Facilitate glucose uptake", "D": "Produce ATP"},
+  "answer_key": "B"
+}
+
+Format 2 - Mechanism-based:
+{
+  "stem": "Which mechanism explains why competitive enzyme inhibitors increase the apparent Km without affecting Vmax?",
+  "options": {"A": "They decrease enzyme concentration", "B": "They compete with substrate for active site binding", "C": "They alter enzyme conformation permanently", "D": "They increase product formation"},
+  "answer_key": "B"
+}
+
+Format 3 - Lab/Research Context:
+{
+  "stem": "A biochemistry student observes that adding excess substrate to an enzyme reaction does not increase velocity beyond a certain point. This observation demonstrates which principle?",
+  "options": {"A": "Allosteric inhibition", "B": "Enzyme saturation kinetics", "C": "Competitive inhibition", "D": "Irreversible inhibition"},
+  "answer_key": "B"
 }
 """,
     "clinical_practice": """
-EXAMPLE MCQ (Clinical Practice):
+EXAMPLE MCQs (Clinical Practice) - Use varied formats like these:
+
+Format 1 - Best Next Step:
 {
-  "topic": "Diabetes Management",
-  "competency": "clinical_practice",
-  "stem": "A 58-year-old woman with type 2 diabetes mellitus presents for routine follow-up. Her HbA1c is 8.2% despite maximum dose metformin. She has a BMI of 32 kg/m2 and mild chronic kidney disease (eGFR 55 mL/min). Which medication should be added next?",
-  "options": {
-    "A": "Glipizide",
-    "B": "Empagliflozin",
-    "C": "Pioglitazone",
-    "D": "Insulin glargine"
-  },
-  "answer_key": "B",
-  "explanation": "SGLT2 inhibitors like empagliflozin are recommended as second-line therapy for patients with type 2 diabetes and CKD due to their dual benefits of glycemic control and renal protection. They also promote weight loss, which benefits this patient with obesity.",
-  "evidence": [{"source": "guideline", "doc_id": "ada_2024", "title": "ADA Standards of Care", "span_text": "In patients with T2DM and CKD with eGFR ≥20 mL/min, an SGLT2 inhibitor is recommended to reduce CKD progression and cardiovascular events."}],
-  "status": "OK"
+  "stem": "What is the most appropriate next step for a patient with newly diagnosed type 2 diabetes and HbA1c of 7.5%?",
+  "options": {"A": "Start insulin therapy", "B": "Lifestyle modification plus metformin", "C": "Add sulfonylurea", "D": "Refer to endocrinologist"},
+  "answer_key": "B"
+}
+
+Format 2 - Clinical Vignette:
+{
+  "stem": "A 58-year-old woman with type 2 diabetes and CKD (eGFR 45 mL/min) needs additional glycemic control. Which agent provides both glycemic and renal benefits?",
+  "options": {"A": "Glipizide", "B": "SGLT2 inhibitor", "C": "Pioglitazone", "D": "Sulfonylurea"},
+  "answer_key": "B"
+}
+
+Format 3 - Guideline-based:
+{
+  "stem": "According to current guidelines, which first-line therapy is recommended for patients with heart failure with reduced ejection fraction?",
+  "options": {"A": "Calcium channel blockers", "B": "ACE inhibitors or ARBs", "C": "Digoxin", "D": "Nitrates"},
+  "answer_key": "B"
 }
 """,
     "pathology": """
-EXAMPLE MCQ (Pathology):
+EXAMPLE MCQs (Pathology) - Use varied formats like these:
+
+Format 1 - Histologic Description:
 {
-  "topic": "Lung Cancer",
-  "competency": "pathology",
-  "stem": "A 65-year-old male smoker presents with hemoptysis and weight loss. Chest CT shows a central lung mass with hilar lymphadenopathy. Biopsy reveals malignant cells with neuroendocrine differentiation and high mitotic rate. Which type of lung cancer is most likely?",
-  "options": {
-    "A": "Adenocarcinoma",
-    "B": "Squamous cell carcinoma",
-    "C": "Small cell lung carcinoma",
-    "D": "Large cell carcinoma"
-  },
-  "answer_key": "C",
-  "explanation": "Small cell lung carcinoma (SCLC) is characterized by neuroendocrine differentiation, high mitotic rate, central location, and strong association with smoking. It typically presents with hilar masses and early metastasis.",
-  "evidence": [{"source": "textbook", "doc_id": "robbins_path", "title": "Robbins Pathology", "span_text": "Small cell carcinoma shows neuroendocrine differentiation with expression of chromogranin and synaptophysin, extremely high mitotic rate, and typically presents as central hilar masses."}],
-  "status": "OK"
+  "stem": "A biopsy shows granulomas with central caseating necrosis surrounded by epithelioid histiocytes and Langhans giant cells. What is the most likely diagnosis?",
+  "options": {"A": "Sarcoidosis", "B": "Tuberculosis", "C": "Foreign body reaction", "D": "Rheumatoid nodule"},
+  "answer_key": "B"
+}
+
+Format 2 - Direct Question:
+{
+  "stem": "Which type of necrosis is characteristically seen in acute pancreatitis?",
+  "options": {"A": "Coagulative necrosis", "B": "Liquefactive necrosis", "C": "Fat necrosis", "D": "Fibrinoid necrosis"},
+  "answer_key": "C"
+}
+
+Format 3 - Marker/Staining:
+{
+  "stem": "Which immunohistochemical marker is most useful for identifying cells of neural crest origin in neuroendocrine tumors?",
+  "options": {"A": "Cytokeratin", "B": "Chromogranin A", "C": "Vimentin", "D": "Desmin"},
+  "answer_key": "B"
 }
 """,
     "treatment": """
-EXAMPLE MCQ (Treatment):
+EXAMPLE MCQs (Treatment) - Use varied formats like these:
+
+Format 1 - First-line Therapy:
 {
-  "topic": "Antibiotic Therapy",
-  "competency": "treatment",
-  "stem": "A 45-year-old man is diagnosed with community-acquired pneumonia requiring hospitalization. He has no drug allergies and normal renal function. His CURB-65 score is 2. Which antibiotic regimen is most appropriate?",
-  "options": {
-    "A": "Amoxicillin alone",
-    "B": "Azithromycin alone",
-    "C": "Ceftriaxone plus azithromycin",
-    "D": "Vancomycin plus piperacillin-tazobactam"
-  },
-  "answer_key": "C",
-  "explanation": "For hospitalized patients with CAP and CURB-65 score of 2, guidelines recommend a beta-lactam (ceftriaxone) plus a macrolide (azithromycin) or respiratory fluoroquinolone monotherapy to cover typical and atypical pathogens.",
-  "evidence": [{"source": "guideline", "doc_id": "ats_cap", "title": "ATS/IDSA CAP Guidelines", "span_text": "For non-severe CAP in hospitalized patients, recommended empiric therapy is a beta-lactam plus macrolide or respiratory fluoroquinolone monotherapy."}],
-  "status": "OK"
+  "stem": "What is the recommended first-line treatment for mild persistent asthma in adults?",
+  "options": {"A": "Short-acting beta-agonist only", "B": "Low-dose inhaled corticosteroid", "C": "Long-acting beta-agonist", "D": "Oral corticosteroids"},
+  "answer_key": "B"
+}
+
+Format 2 - Drug Selection:
+{
+  "stem": "Which antihypertensive medication class is preferred in a patient with diabetes and proteinuria?",
+  "options": {"A": "Thiazide diuretics", "B": "ACE inhibitors", "C": "Calcium channel blockers", "D": "Beta-blockers"},
+  "answer_key": "B"
+}
+
+Format 3 - Contraindication/Caution:
+{
+  "stem": "Metformin should be temporarily discontinued in patients undergoing which procedure?",
+  "options": {"A": "Routine blood draw", "B": "Contrast-enhanced CT scan", "C": "Electrocardiogram", "D": "Chest X-ray"},
+  "answer_key": "B"
 }
 """,
     "etiology": """
-EXAMPLE MCQ (Etiology):
+EXAMPLE MCQs (Etiology) - Use varied formats like these:
+
+Format 1 - Most Common Cause:
 {
-  "topic": "Peptic Ulcer Disease",
-  "competency": "etiology",
-  "stem": "A 48-year-old man presents with epigastric pain that improves with eating. Upper endoscopy reveals a duodenal ulcer. Which of the following is the most common etiology of duodenal ulcers?",
-  "options": {
-    "A": "Zollinger-Ellison syndrome",
-    "B": "Helicobacter pylori infection",
-    "C": "NSAID use",
-    "D": "Crohn's disease"
-  },
-  "answer_key": "B",
-  "explanation": "Helicobacter pylori infection is the most common cause of duodenal ulcers, accounting for approximately 70-90% of cases. The bacteria disrupts the protective mucosal barrier and stimulates gastric acid secretion.",
-  "evidence": [{"source": "pubmed", "doc_id": "peptic_001", "title": "Etiology of Peptic Ulcer", "span_text": "Helicobacter pylori infection remains the predominant cause of peptic ulcer disease, responsible for approximately 70-90% of duodenal ulcers and 60-70% of gastric ulcers worldwide."}],
-  "status": "OK"
+  "stem": "What is the most common cause of community-acquired pneumonia in adults?",
+  "options": {"A": "Haemophilus influenzae", "B": "Streptococcus pneumoniae", "C": "Mycoplasma pneumoniae", "D": "Staphylococcus aureus"},
+  "answer_key": "B"
+}
+
+Format 2 - Risk Factor:
+{
+  "stem": "Which factor most significantly increases the risk of developing colorectal cancer?",
+  "options": {"A": "High-fiber diet", "B": "Family history of adenomatous polyps", "C": "Regular exercise", "D": "Aspirin use"},
+  "answer_key": "B"
+}
+
+Format 3 - Pathogen/Agent:
+{
+  "stem": "Which organism is the primary etiologic agent of peptic ulcer disease?",
+  "options": {"A": "Escherichia coli", "B": "Helicobacter pylori", "C": "Campylobacter jejuni", "D": "Clostridium difficile"},
+  "answer_key": "B"
 }
 """,
     "diagnosis": """
-EXAMPLE MCQ (Diagnosis):
+EXAMPLE MCQs (Diagnosis) - Use varied formats like these:
+
+Format 1 - Most Sensitive Test:
 {
-  "topic": "Acute Appendicitis",
-  "competency": "diagnosis",
-  "stem": "A 22-year-old woman presents with 12 hours of periumbilical pain that has migrated to the right lower quadrant. She has fever, anorexia, and rebound tenderness at McBurney's point. Which finding would most strongly support the diagnosis of acute appendicitis?",
-  "options": {
-    "A": "WBC count of 8,000/μL",
-    "B": "Positive psoas sign",
-    "C": "Normal abdominal CT scan",
-    "D": "Decreased bowel sounds"
-  },
-  "answer_key": "B",
-  "explanation": "A positive psoas sign (pain with hip extension) indicates retroperitoneal inflammation, strongly suggesting an inflamed retrocecal appendix. Combined with the classic migration of pain and McBurney's point tenderness, this supports acute appendicitis.",
-  "evidence": [{"source": "textbook", "doc_id": "surg_001", "title": "Principles of Surgery", "span_text": "The psoas sign is elicited by passive extension of the right hip, which stretches the iliopsoas muscle and causes pain when an inflamed appendix lies in the retrocecal position."}],
-  "status": "OK"
+  "stem": "What is the most sensitive initial test for detecting iron deficiency anemia?",
+  "options": {"A": "Serum iron", "B": "Serum ferritin", "C": "Total iron-binding capacity", "D": "Hemoglobin level"},
+  "answer_key": "B"
+}
+
+Format 2 - Gold Standard:
+{
+  "stem": "Which diagnostic modality is considered the gold standard for diagnosing pulmonary embolism?",
+  "options": {"A": "Chest X-ray", "B": "CT pulmonary angiography", "C": "D-dimer", "D": "Ventilation-perfusion scan"},
+  "answer_key": "B"
+}
+
+Format 3 - Clinical Finding:
+{
+  "stem": "Which physical examination finding is most specific for acute appendicitis?",
+  "options": {"A": "Diffuse abdominal tenderness", "B": "Rebound tenderness at McBurney's point", "C": "Hyperactive bowel sounds", "D": "Abdominal distension"},
+  "answer_key": "B"
 }
 """,
 }
+
 
 # Fallback example
 DEFAULT_EXAMPLE = """
