@@ -36,6 +36,13 @@ class ReviewerClient:
             raise RuntimeError("reviewer_empty_response")
         return _parse_reviewer_decision(text)
 
+    def check_topic_coverage(self, topic: str, evidence_text: str) -> bool:
+        prompt = _build_topic_coverage_prompt(topic, evidence_text)
+        text = self._llm_client.generate_text(prompt)
+        if text is None:
+            raise RuntimeError("topic_coverage_empty_response")
+        return _parse_topic_coverage_decision(text)
+
 
 @dataclass
 class VerificationResult:
@@ -72,7 +79,14 @@ def verify_questions(
             notes.append(str(exc))
 
         failed_checks.extend(_check_evidence_spans(question, doc_lookup, notes))
-        failed_checks.extend(_check_topic_coverage(question, doc_lookup, notes))
+        failed_checks.extend(
+            _check_topic_coverage_llm(
+                question,
+                doc_lookup,
+                notes,
+                reviewer if run_reviewer else None,
+            )
+        )
 
         if (
             run_reviewer
@@ -137,6 +151,13 @@ def verify_questions(
 
         results.append(VerificationResult(question=question, report=report))
 
+    LOGGER.info(
+        "\nVerification done: questions=%s passed=%s failed=%s",
+        len(results),
+        sum(1 for result in results if result.report.passed),
+        sum(1 for result in results if not result.report.passed),
+    )
+
     return results
 
 
@@ -171,19 +192,13 @@ def _check_evidence_spans(
     return failed_checks
 
 
-def _check_topic_coverage(
+def _check_topic_coverage_llm(
     question: QuestionItem,
     doc_lookup: dict[str, Document],
     notes: List[str],
+    reviewer: Optional[ReviewerClient],
 ) -> List[str]:
     failed_checks: List[str] = []
-    topic_tokens = {
-        token.lower()
-        for token in _TOPIC_TOKEN_RE.findall(question.topic or "")
-        if len(token) > 2
-    }
-    if not topic_tokens:
-        return failed_checks
 
     evidence_docs = [
         doc_lookup.get(evidence.doc_id)
@@ -194,10 +209,22 @@ def _check_topic_coverage(
     if not evidence_docs:
         return failed_checks
 
-    for doc in evidence_docs:
-        doc_text = _normalize_match_text(f"{doc.title} {doc.text}")
-        if any(token in doc_text for token in topic_tokens):
+    if reviewer is None:
+        return failed_checks
+
+    try:
+        evidence_text = render_evidence(
+            evidence_docs,
+            max_chars_per_doc=settings.EVIDENCE_MAX_CHARS_PER_DOC,
+            max_total_chars=settings.EVIDENCE_MAX_TOTAL_CHARS,
+        )
+        is_covered = reviewer.check_topic_coverage(question.topic, evidence_text)
+        if is_covered:
             return failed_checks
+    except Exception as exc:
+        failed_checks.append("topic_coverage_error")
+        notes.append(str(exc))
+        return failed_checks
 
     failed_checks.append("topic_coverage")
     notes.append("no topic token found in evidence docs")
@@ -227,6 +254,16 @@ def _build_review_prompt(question: QuestionItem, evidence_text: str) -> str:
     )
 
 
+def _build_topic_coverage_prompt(topic: str, evidence_text: str) -> str:
+    return (
+        "You are checking whether the evidence is relevant to the topic.\n"
+        "Reply with a single token: YES or NO.\n"
+        "Do not add extra text.\n\n"
+        f"Topic: {topic}\n\n"
+        f"Evidence:\n{evidence_text}\n"
+    )
+
+
 def _parse_reviewer_decision(text: str) -> str:
     normalized = text.strip().upper()
     if "INSUFFICIENT" in normalized:
@@ -235,3 +272,12 @@ def _parse_reviewer_decision(text: str) -> str:
     if match:
         return match.group(1).upper()
     return "INSUFFICIENT"
+
+
+def _parse_topic_coverage_decision(text: str) -> bool:
+    normalized = text.strip().upper()
+    if "YES" in normalized:
+        return True
+    if "NO" in normalized:
+        return False
+    return False

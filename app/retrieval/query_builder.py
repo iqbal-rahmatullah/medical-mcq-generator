@@ -4,172 +4,168 @@ from typing import Dict, List
 
 
 _COMPETENCY_EXPANSIONS: Dict[str, List[str]] = {
-    # Diagnosis: gejala, tanda, rangkaian pemeriksaan, dan tes diagnostik.
-    "diagnosis": [
-        "diagnosis",
-        "differential diagnosis",
-        "signs",
-        "symptoms",
-        "screening",
-        "clinical features",
-        "presentation",
-        "diagnostic criteria",
-        "workup",
-        "evaluation",
-        "diagnostic test",
-        "laboratory findings",
-        "imaging",
+    # ILMU DASAR (Bukti: ~740.000 kemunculan)
+    # Mencakup biologi seluler/molekuler, anatomi, dan fisiologi normal
+    # Kata kunci teratas: cells (102K), protein (33K), enzyme (25K), blood (32K), tissue (21K)
+    # Rasional: Cluster kata kunci terbesar dalam dataset, fondasi pengetahuan medis fundamental
+    # Cakupan: mekanisme molekuler, proses seluler, struktur anatomi, sistem tubuh
+    "basic_sciences": [
+        "cells",
+        "cell",
+        "protein",
+        "enzyme",
+        "acid",
+        "molecular",
+        "synthesis",
+        "membrane",
+        "binding",
+        "gene",
+        "anatomy",
+        "blood",
+        "tissue",
+        "muscle",
+        "liver",
+        "organ",
+        "system",
+        "physiology",
+        "function",
+        "normal",
+        "activity",
+        "homeostasis",
     ],
-    # Treatment: terapi, obat, dosis, serta penanganan saat kondisi akut dan jangka panjang.
+    
+    # PRAKTIK KLINIS (Bukti: ~245.000 kemunculan)
+    # Perawatan klinis berpusat pada pasien dan manajemen kasus
+    # Kata kunci teratas: patients (88K), patient (20K), clinical (24K), cases (28K)
+    # Rasional: Cluster terbesar kedua, mencerminkan aplikasi klinis dari pengetahuan medis
+    # Cakupan: perawatan pasien, skenario klinis, studi kasus, pengambilan keputusan klinis
+    "clinical_practice": [
+        "patients",
+        "patient",
+        "clinical",
+        "cases",
+        "case",
+        "study",
+        "management",
+        "care",
+        "presentation",
+        "history",
+        "physical examination",
+        "clinical assessment",
+        "patient management",
+        "clinical scenario",
+        "bedside",
+        "rounds",
+    ],
+    
+    # PATOLOGI (Bukti: ~155.000 kemunculan)
+    # Proses penyakit, kondisi patologis, dan abnormalitas (Deskripsi penyakit dan perubahannya)
+    # Kata kunci teratas: disease (45K), infection (20K), tumor (15K), cancer (13K), syndrome (18K)
+    # Rasional: Inti dari pemahaman kondisi medis dan manifestasinya
+    # Cakupan: penyakit, infeksi, neoplasma, sindrom, proses patologis
+    "pathology": [
+        "disease",
+        "infection",
+        "tumor",
+        "cancer",
+        "syndrome",
+        "disorder",
+        "pathology",
+        "lesion",
+        "abnormal",
+        "pathological",
+        "malignancy",
+        "benign",
+        "acute",
+        "chronic",
+        "inflammation",
+        "necrosis",
+        "fibrosis",
+        "metastasis",
+    ],
+    
+    # PENGOBATAN (Bukti: ~113.000 kemunculan)
+    # Intervensi terapeutik dan strategi manajemen pasien
+    # Kata kunci teratas: treatment (37K), therapy (19K), drugs (12K), drug (12K)
+    # Rasional: Kompetensi berorientasi tindakan, sangat relevan untuk praktik klinis
+    # Cakupan: obat-obatan, terapi, intervensi bedah, pendekatan manajemen
     "treatment": [
         "treatment",
         "therapy",
-        "management",
         "drug",
-        "dosage",
+        "drugs",
         "medication",
         "pharmacotherapy",
+        "surgery",
+        "surgical",
+        "intervention",
+        "management",
+        "dose",
+        "dosage",
+        "administration",
+        "prescription",
         "first-line",
         "second-line",
         "guideline",
-        "intervention",
+        "protocol",
         "acute management",
         "long-term management",
     ],
-    # Etiology: penyebab, faktor risiko, dan proses penyakit berkembang.
+    
+    # ETIOLOGI (Bukti: ~72.000 kemunculan)
+    # Penyebab, faktor risiko, dan mekanisme penyakit (Penyebab dan mekanisme terjadinya penyakit)
+    # Kata kunci teratas: cause (13K), caused (11K), mechanism (8K), associated (25K)
+    # Rasional: Memahami "mengapa" penyakit terjadi, esensial untuk pencegahan dan pengobatan
+    # Cakupan: kausalitas, faktor risiko, patogenesis, mekanisme penyakit
     "etiology": [
-        "etiology",
         "cause",
+        "caused",
+        "causes",
+        "etiology",
+        "risk",
         "risk factors",
-        "pathogenesis",
         "mechanism",
+        "mechanisms",
+        "pathogenesis",
+        "associated",
+        "predisposing",
         "underlying cause",
         "genetic factors",
         "environmental factors",
-        "predisposing factors",
-        "associated conditions",
+        "trigger",
+        "precipitating factors",
         "epidemiology",
         "incidence",
+        "prevalence",
     ],
-    # Prevention: pencegahan, pengurangan risiko, skrining, dan upaya pencegahan untuk publik.
-    "prevention": [
-        "prevention",
-        "prophylaxis",
-        "risk reduction",
+    
+    # DIAGNOSIS (Bukti: ~60.000 kemunculan)
+    # Penilaian klinis, workup diagnostik, dan interpretasi tes
+    # Kata kunci teratas: diagnosis (15K), symptoms (12K), test (11K), examination (6K)
+    # Rasional: Esensial untuk pengambilan keputusan klinis dan penilaian pasien yang akurat
+    # Cakupan: gejala, tanda, tes diagnostik, kriteria klinis, diagnosis banding
+    "diagnosis": [
+        "diagnosis",
+        "diagnostic",
+        "symptoms",
+        "signs",
+        "test",
+        "tests",
+        "examination",
+        "evaluation",
+        "assessment",
         "screening",
-        "vaccination",
-        "primary prevention",
-        "secondary prevention",
-        "lifestyle modification",
-        "counseling",
-        "public health",
-        "early detection",
-        "follow-up",
-    ],
-    # Prognosis: luaran, angka kematian, kekambuhan, dan derajat keparahan.
-    "prognosis": [
-        "prognosis",
-        "outcomes",
-        "mortality",
-        "survival",
-        "complications",
-        "disease course",
-        "recurrence",
-        "risk stratification",
-        "severity",
-        "long-term outcomes",
-        "quality of life",
-        "predictors",
-    ],
-    # Screening: deteksi dini, performa tes, dan panduan skrining.
-    "screening": [
-        "screening",
-        "early detection",
-        "risk assessment",
-        "screening test",
-        "sensitivity",
-        "specificity",
-        "guideline",
-        "population screening",
-        "high-risk",
-        "preventive care",
-        "follow-up",
-        "diagnostic threshold",
-    ],
-    # Complications: luaran buruk dan kondisi yang makin memburuk.
-    "complications": [
-        "complications",
-        "adverse outcomes",
-        "sequelae",
-        "comorbidity",
-        "disease progression",
-        "risk factors",
-        "mortality",
-        "morbidity",
-        "hospitalization",
-        "long-term effects",
-        "severity",
-        "clinical deterioration",
-    ],
-    # Pathophysiology: mekanisme, jalur biologis, dan penanda di tubuh.
-    "pathophysiology": [
-        "pathophysiology",
-        "pathogenesis",
-        "mechanism",
-        "molecular pathway",
-        "cellular response",
-        "inflammation",
-        "hemodynamics",
-        "neurohormonal",
-        "physiology",
-        "biomarkers",
-        "dysfunction",
-        "disease process",
-    ],
-    # Pharmacology: mekanisme obat, dosis, efek samping, dan keamanan.
-    "pharmacology": [
-        "pharmacology",
-        "drug mechanism",
-        "indication",
-        "contraindication",
-        "adverse effects",
-        "drug interaction",
-        "dosage",
-        "pharmacokinetics",
-        "pharmacodynamics",
-        "monitoring",
-        "toxicity",
-        "therapeutic target",
-    ],
-    # Monitoring: follow-up, respons terapi, dan pemantauan efek.
-    "monitoring": [
-        "monitoring",
-        "follow-up",
-        "treatment response",
-        "labs",
-        "imaging",
-        "vital signs",
-        "disease control",
-        "therapeutic monitoring",
-        "adverse effects",
-        "dose adjustment",
-        "clinical assessment",
-        "outcome tracking",
-    ],
-    # Investigation: pemeriksaan diagnostik, rangkaian pemeriksaan, dan akurasi tes.
-    "investigation": [
-        "investigation",
-        "diagnostic test",
-        "laboratory findings",
+        "differential diagnosis",
+        "clinical features",
+        "presentation",
+        "findings",
+        "laboratory",
         "imaging",
         "workup",
-        "evaluation",
-        "differential diagnosis",
-        "clinical criteria",
-        "biomarkers",
-        "screening",
+        "diagnostic criteria",
+        "sensitivity",
+        "specificity",
         "confirmatory test",
-        "diagnostic accuracy",
     ],
 }
 

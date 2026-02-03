@@ -291,7 +291,11 @@ class LLMClient:
             return None
 
         try:
-            client = Cerebras(api_key=resolved_key)
+            client = Cerebras(
+                api_key=resolved_key,
+                timeout=settings.CEREBRAS_TIMEOUT_SEC or self._timeout_sec,
+                max_retries=max(settings.CEREBRAS_MAX_RETRIES, 0),
+            )
             payload: dict[str, Any] = {
                 "model": model,
                 "messages": [

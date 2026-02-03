@@ -36,6 +36,8 @@ class Settings(BaseSettings):
     LLM_REASONING_EFFORT: str = ""
     LLM_STOP: str = ""
     LLM_STREAM: bool = False
+    CEREBRAS_TIMEOUT_SEC: float = 30.0
+    CEREBRAS_MAX_RETRIES: int = 1
     OK_ONLY_MODE: bool = True
     OK_ONLY_MAX_ROUNDS: int = 3
     OK_ONLY_MAX_SECONDS: float = 90.0
