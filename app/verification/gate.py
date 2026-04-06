@@ -26,8 +26,9 @@ class VerificationReport(BaseModel):
 
 
 class ReviewerClient:
-    def __init__(self, llm_client: LLMClient) -> None:
+    def __init__(self, llm_client: LLMClient, model_name: str = "") -> None:
         self._llm_client = llm_client
+        self._model_name = model_name
 
     def review(self, question: QuestionItem, evidence_text: str) -> str:
         prompt = _build_review_prompt(question, evidence_text)
@@ -50,10 +51,61 @@ class VerificationResult:
     report: VerificationReport
 
 
+class CrossCoVeReviewer:
+    """Cross-Chain-of-Verification with 3 different LLM reviewers and majority voting."""
+    
+    def __init__(self, reviewers: List[ReviewerClient]) -> None:
+        self._reviewers = reviewers
+    
+    def cross_verify(self, question: QuestionItem, evidence_text: str) -> str:
+        """Run verification with all reviewers and return majority vote."""
+        votes = []
+        for reviewer in self._reviewers:
+            try:
+                decision = reviewer.review(question, evidence_text)
+                votes.append(decision)
+                LOGGER.info(
+                    "\\nCross-CoVe vote: model=%s decision=%s",
+                    getattr(reviewer, '_model_name', 'unknown'),
+                    decision,
+                )
+            except Exception as exc:
+                LOGGER.warning("Cross-CoVe reviewer failed: %s", exc)
+                continue
+        
+        if not votes:
+            return "INSUFFICIENT"
+        
+        # Majority voting
+        from collections import Counter
+        vote_counts = Counter(votes)
+        majority_answer, count = vote_counts.most_common(1)[0]
+        
+        LOGGER.info(
+            "\\nCross-CoVe result: votes=%s majority=%s count=%s",
+            votes,
+            majority_answer,
+            count,
+        )
+        
+        return majority_answer
+    
+    def check_topic_coverage(self, topic: str, evidence_text: str) -> bool:
+        """Check topic coverage using first available reviewer."""
+        for reviewer in self._reviewers:
+            try:
+                return reviewer.check_topic_coverage(topic, evidence_text)
+            except Exception:
+                continue
+        return False
+
+
+
 def verify_questions(
     questions: Iterable[QuestionItem],
     evidence_docs: List[Document],
     reviewer: Optional[ReviewerClient] = None,
+    cross_cove_reviewer: Optional[CrossCoVeReviewer] = None,
     run_reviewer: bool = True,
 ) -> List[VerificationResult]:
     if not isinstance(questions, list):
@@ -90,7 +142,6 @@ def verify_questions(
 
         if (
             run_reviewer
-            and reviewer is not None
             and question.status == "OK"
             and not failed_checks
         ):
@@ -100,35 +151,44 @@ def verify_questions(
                     max_chars_per_doc=settings.EVIDENCE_MAX_CHARS_PER_DOC,
                     max_total_chars=settings.EVIDENCE_MAX_TOTAL_CHARS,
                 )
-                decision = reviewer.review(question, evidence_text)
-                if decision == "INSUFFICIENT":
+                
+                # Use Cross-CoVe if enabled and available, otherwise fall back to single reviewer
+                if settings.COVE_ENABLED and cross_cove_reviewer is not None:
+                    decision = cross_cove_reviewer.cross_verify(question, evidence_text)
+                    reviewer_mode = "cross_cove"
+                elif reviewer is not None:
+                    decision = reviewer.review(question, evidence_text)
+                    reviewer_mode = "single"
+                else:
+                    decision = None
+                    reviewer_mode = "none"
+                
+                if decision is None:
+                    pass  # No review performed
+                elif decision == "INSUFFICIENT":
                     LOGGER.warning(
-                        "\nReviewer failed: reason=insufficient provider=%s model=%s topic=%s competency=%s answer_key=%s",
-                        settings.REVIEWER_PROVIDER or settings.LLM_PROVIDER,
-                        settings.REVIEWER_MODEL or settings.LLM_MODEL,
+                        "\\nReviewer failed: reason=insufficient mode=%s topic=%s competency=%s answer_key=%s",
+                        reviewer_mode,
                         question.topic,
                         question.competency,
                         question.answer_key,
                     )
                     failed_checks.append("reviewer_insufficient")
-                    notes.append("reviewer returned INSUFFICIENT")
+                    notes.append(f"reviewer ({reviewer_mode}) returned INSUFFICIENT")
                 elif decision != question.answer_key:
                     LOGGER.warning(
-                        "\nReviewer failed: reason=mismatch provider=%s model=%s topic=%s competency=%s expected=%s got=%s",
-                        settings.REVIEWER_PROVIDER or settings.LLM_PROVIDER,
-                        settings.REVIEWER_MODEL or settings.LLM_MODEL,
+                        "\\nReviewer failed: reason=mismatch mode=%s topic=%s competency=%s expected=%s got=%s",
+                        reviewer_mode,
                         question.topic,
                         question.competency,
                         question.answer_key,
                         decision,
                     )
                     failed_checks.append("reviewer_mismatch")
-                    notes.append(f"reviewer={decision} expected={question.answer_key}")
+                    notes.append(f"reviewer ({reviewer_mode})={decision} expected={question.answer_key}")
             except Exception as exc:
                 LOGGER.warning(
-                    "\nReviewer error: provider=%s model=%s topic=%s competency=%s error=%s",
-                    settings.REVIEWER_PROVIDER or settings.LLM_PROVIDER,
-                    settings.REVIEWER_MODEL or settings.LLM_MODEL,
+                    "\\nReviewer error: topic=%s competency=%s error=%s",
                     question.topic,
                     question.competency,
                     exc,

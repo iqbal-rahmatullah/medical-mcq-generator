@@ -27,7 +27,7 @@ from app.schemas.request import GenerateRequestItem
 from app.schemas.response import Meta, Options, QuestionItem, QuestionStatus
 from app.logging.logger import log_run
 from app.logging.question_bank import append_question_bank, load_question_bank
-from app.verification.gate import ReviewerClient, VerificationResult, verify_questions
+from app.verification.gate import CrossCoVeReviewer, ReviewerClient, VerificationResult, verify_questions
 
 LOGGER = logging.getLogger(__name__)
 
@@ -166,7 +166,98 @@ def _get_reviewer_client() -> Optional[ReviewerClient]:
         cerebras_api_key=cerebras_api_key or None,
         fallback_targets_json=settings.REVIEWER_FALLBACKS,
     )
-    return ReviewerClient(reviewer_llm)
+    return ReviewerClient(reviewer_llm, model_name=model)
+
+
+def _create_reviewer_from_config(
+    provider: str,
+    api_key: str,
+    model: str,
+    fallbacks_json: str = "",
+) -> Optional[ReviewerClient]:
+    """Create a single reviewer client from config with fallback support."""
+    if not model or not provider:
+        return None
+    
+    timeout_sec = settings.REVIEWER_TIMEOUT_SEC or settings.LLM_TIMEOUT_SEC
+    cerebras_api_key = ""
+    groq_api_key = ""
+    
+    provider_lower = provider.strip().lower()
+    
+    if provider_lower in ("cerebras", "cerebras_sdk", "cerebras_cloud"):
+        cerebras_api_key = api_key
+    elif provider_lower in ("groq", "groq_sdk", "groq_cloud"):
+        groq_api_key = api_key
+    
+    try:
+        llm_client = LLMClient(
+            api_key=api_key or None,
+            api_base=None,
+            model=model,
+            timeout_sec=timeout_sec,
+            provider=provider_lower or None,
+            groq_api_key=groq_api_key or None,
+            cerebras_api_key=cerebras_api_key or None,
+            fallback_targets_json=fallbacks_json,
+        )
+        return ReviewerClient(llm_client, model_name=model)
+    except Exception as exc:
+        LOGGER.warning("Failed to create reviewer for model %s: %s", model, exc)
+        return None
+
+
+def _get_cross_cove_reviewer() -> Optional[CrossCoVeReviewer]:
+    """Create CrossCoVeReviewer with 3 different models for majority voting."""
+    if not settings.COVE_ENABLED:
+        return None
+    
+    reviewers: List[ReviewerClient] = []
+    
+    # Reviewer 1
+    r1 = _create_reviewer_from_config(
+        settings.REVIEWER_1_PROVIDER or settings.REVIEWER_PROVIDER,
+        settings.REVIEWER_1_API_KEY or settings.REVIEWER_API_KEY,
+        settings.REVIEWER_1_MODEL or settings.REVIEWER_MODEL,
+        settings.REVIEWER_1_FALLBACKS,
+    )
+    if r1:
+        reviewers.append(r1)
+    
+    # Reviewer 2
+    r2 = _create_reviewer_from_config(
+        settings.REVIEWER_2_PROVIDER or settings.REVIEWER_PROVIDER,
+        settings.REVIEWER_2_API_KEY or settings.REVIEWER_API_KEY,
+        settings.REVIEWER_2_MODEL,
+        settings.REVIEWER_2_FALLBACKS,
+    )
+    if r2:
+        reviewers.append(r2)
+    
+    # Reviewer 3
+    r3 = _create_reviewer_from_config(
+        settings.REVIEWER_3_PROVIDER or settings.REVIEWER_PROVIDER,
+        settings.REVIEWER_3_API_KEY or settings.REVIEWER_API_KEY,
+        settings.REVIEWER_3_MODEL,
+        settings.REVIEWER_3_FALLBACKS,
+    )
+    if r3:
+        reviewers.append(r3)
+    
+    if len(reviewers) < 2:
+        LOGGER.warning(
+            "Cross-CoVe requires at least 2 reviewers, got %d. Falling back to single reviewer.",
+            len(reviewers),
+        )
+        return None
+    
+    LOGGER.info(
+        "Cross-CoVe initialized with %d reviewers: %s",
+        len(reviewers),
+        [r._model_name for r in reviewers],
+    )
+    
+    return CrossCoVeReviewer(reviewers)
 
 
 def _rewrite_query(topic: str, competency: str) -> str:
@@ -416,6 +507,7 @@ def _generate_single_question(
     retriever: Retriever,
     llm_client: LLMClient,
     reviewer_client: Optional[ReviewerClient],
+    cross_cove_reviewer: Optional[CrossCoVeReviewer],
     avoid_stems: List[str],
     used_doc_ids: Optional[set[str]] = None,
 ) -> tuple[QuestionItem, List[Dict[str, object]]]:
@@ -672,6 +764,7 @@ def _generate_single_question(
             questions,
             verification_docs,
             reviewer=reviewer_client,
+            cross_cove_reviewer=cross_cove_reviewer,
             run_reviewer=True,
         )
         verification_ms = (time.perf_counter() - verification_start) * 1000.0
@@ -919,6 +1012,7 @@ def run_pipeline_stream(
     retriever = _get_retriever()
     llm_client = _get_llm_client()
     reviewer_client = _get_reviewer_client()
+    cross_cove_reviewer = _get_cross_cove_reviewer()
     run_started = time.perf_counter()
     run_id = uuid.uuid4().hex
     run_timestamp = datetime.utcnow().isoformat() + "Z"
@@ -1144,6 +1238,7 @@ def run_pipeline_stream(
                                 retriever,
                                 llm_client,
                                 reviewer_client,
+                                cross_cove_reviewer,
                                 avoid_stems,
                                 item_doc_ids,
                             )
@@ -1277,6 +1372,7 @@ def run_pipeline_stream(
                         retriever,
                         llm_client,
                         reviewer_client,
+                        cross_cove_reviewer,
                         avoid_stems,
                         run_used_doc_ids,
                     )

@@ -48,3 +48,5 @@ web/out/
 web/package-lock.json
 
 data/*
+
+docs/*
