@@ -56,6 +56,7 @@ class Settings(BaseSettings):
     REVIEWER_MODEL: str = ""
     REVIEWER_TIMEOUT_SEC: float = 60.0
     REVIEWER_FALLBACKS: str = ""
+    REVIEWER_MAX_COMPLETION_TOKENS: int = 256
     
     # Cross-CoVe: 3 different reviewers for majority voting
     COVE_ENABLED: bool = True

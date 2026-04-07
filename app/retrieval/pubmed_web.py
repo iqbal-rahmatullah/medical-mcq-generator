@@ -2,10 +2,17 @@ from __future__ import annotations
 
 import json
 import logging
+import ssl
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
 from typing import Iterable, List, Optional
+
+try:
+    import certifi
+    _SSL_CONTEXT = ssl.create_default_context(cafile=certifi.where())
+except ImportError:
+    _SSL_CONTEXT = None
 
 from app.corpus.models import Document
 
@@ -28,13 +35,13 @@ def _build_query_params(params: dict[str, str]) -> str:
 
 
 def _fetch_json(url: str, timeout_sec: float) -> dict:
-    with urllib.request.urlopen(url, timeout=timeout_sec) as response:
+    with urllib.request.urlopen(url, timeout=timeout_sec, context=_SSL_CONTEXT) as response:
         payload = response.read().decode("utf-8")
     return json.loads(payload)
 
 
 def _fetch_text(url: str, timeout_sec: float) -> str:
-    with urllib.request.urlopen(url, timeout=timeout_sec) as response:
+    with urllib.request.urlopen(url, timeout=timeout_sec, context=_SSL_CONTEXT) as response:
         return response.read().decode("utf-8")
 
 

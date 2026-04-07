@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Literal
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field, TypeAdapter
 
@@ -42,7 +42,10 @@ class QuestionItem(BaseModel):
     explanation: str
     evidence: List[EvidenceItem]
     status: QuestionStatus
-    meta: Meta
+    meta: Meta = Field(default_factory=Meta)
+    stem_id: str = ""
+    options_id: Optional[Options] = None
+    explanation_id: str = ""
 
 
 def export_question_schema() -> Dict[str, Any]:

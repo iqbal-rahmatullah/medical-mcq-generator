@@ -60,6 +60,7 @@ class CrossCoVeReviewer:
     def cross_verify(self, question: QuestionItem, evidence_text: str) -> str:
         """Run verification with all reviewers and return majority vote."""
         votes = []
+        total_reviewers = len(self._reviewers)
         for reviewer in self._reviewers:
             try:
                 decision = reviewer.review(question, evidence_text)
@@ -70,24 +71,32 @@ class CrossCoVeReviewer:
                     decision,
                 )
             except Exception as exc:
-                LOGGER.warning("Cross-CoVe reviewer failed: %s", exc)
+                LOGGER.warning("Cross-CoVe reviewer failed (skipped): %s", exc)
                 continue
-        
+
         if not votes:
             return "INSUFFICIENT"
-        
+
+        min_quorum = (total_reviewers + 1) // 2
+        if len(votes) < min_quorum:
+            LOGGER.warning(
+                "\\nCross-CoVe quorum not met: got %d/%d votes (need %d), returning INSUFFICIENT",
+                len(votes), total_reviewers, min_quorum,
+            )
+            return "INSUFFICIENT"
+
         # Majority voting
         from collections import Counter
         vote_counts = Counter(votes)
         majority_answer, count = vote_counts.most_common(1)[0]
-        
+
         LOGGER.info(
             "\\nCross-CoVe result: votes=%s majority=%s count=%s",
             votes,
             majority_answer,
             count,
         )
-        
+
         return majority_answer
     
     def check_topic_coverage(self, topic: str, evidence_text: str) -> bool:
@@ -245,11 +254,23 @@ def _check_evidence_spans(
             notes.append(f"empty span_text for doc_id: {evidence.doc_id}")
             continue
         doc_text = _normalize_match_text(f"{doc.title} {doc.text}")
-        if span_text and span_text not in doc_text:
+        if span_text and span_text in doc_text:
+            continue
+        if not _span_fuzzy_match(span_text, doc_text, threshold=0.70):
             failed_checks.append("evidence_span_mismatch")
             notes.append(f"span not found in doc_id: {evidence.doc_id}")
 
     return failed_checks
+
+
+def _span_fuzzy_match(span: str, doc_text: str, threshold: float = 0.70) -> bool:
+    """Return True if ≥threshold fraction of span tokens appear in the doc text."""
+    span_tokens = set(span.split())
+    if not span_tokens:
+        return False
+    doc_tokens = set(doc_text.split())
+    overlap = len(span_tokens & doc_tokens)
+    return (overlap / len(span_tokens)) >= threshold
 
 
 def _check_topic_coverage_llm(

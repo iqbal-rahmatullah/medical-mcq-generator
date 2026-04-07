@@ -171,6 +171,34 @@ EXAMPLE MCQ:
 }
 """
 
+# Fallback example bahasa
+DEFAULT_EXAMPLE_BILINGUAL = """
+EXAMPLE MCQ (with Bahasa Indonesia translation):
+{
+  "topic": "General Medicine",
+  "competency": "clinical_practice",
+  "stem": "A 50-year-old patient presents with fatigue and pallor. Laboratory studies show hemoglobin of 8.5 g/dL and MCV of 68 fL. Which initial test is most appropriate?",
+  "options": {
+    "A": "Vitamin B12 level",
+    "B": "Serum ferritin",
+    "C": "Hemoglobin electrophoresis",
+    "D": "Bone marrow biopsy"
+  },
+  "answer_key": "B",
+  "explanation": "Microcytic anemia (low MCV) with fatigue suggests iron deficiency anemia as the most common cause. Serum ferritin is the most sensitive initial test for iron stores.",
+  "stem_id": "Seorang pasien laki-laki usia 50 tahun datang dengan keluhan kelelahan dan pucat. Pemeriksaan laboratorium menunjukkan hemoglobin 8,5 g/dL dan MCV 68 fL. Pemeriksaan awal manakah yang paling tepat?",
+  "options_id": {
+    "A": "Kadar Vitamin B12",
+    "B": "Serum feritin",
+    "C": "Elektroforesis hemoglobin",
+    "D": "Biopsi sumsum tulang"
+  },
+  "explanation_id": "Anemia mikrositik (MCV rendah) dengan kelelahan mengarah pada anemia defisiensi besi sebagai penyebab tersering. Serum feritin adalah pemeriksaan awal yang paling sensitif untuk cadangan zat besi.",
+  "evidence": [{"source": "textbook", "doc_id": "heme_001", "title": "Hematology", "span_text": "Serum ferritin is the most sensitive marker for iron deficiency, with levels below 30 ng/mL being diagnostic."}],
+  "status": "OK"
+}
+"""
+
 PROMPT_TEMPLATE = """
 You are generating medical multiple-choice questions (MCQ) in JSON only.
 
@@ -224,10 +252,74 @@ Evidence:
 {evidence_text}
 """
 
+PROMPT_TEMPLATE_BILINGUAL = """
+You are generating medical multiple-choice questions (MCQ) in JSON only, with dual-language output (English and Bahasa Indonesia).
 
-def get_few_shot_example(competency: str) -> str:
+Constraints:
+- Output MUST be a JSON array of length {n_questions}.
+- Do not wrap in markdown or code fences.
+- Each item MUST match this schema exactly:
+  {{
+    "topic": "...",
+    "competency": "...",
+    "stem": "...(English question stem)...",
+    "options": {{"A": "...", "B": "...", "C": "...", "D": "..."}},
+    "answer_key": "A",
+    "explanation": "...(English explanation)...",
+    "stem_id": "...(Terjemahan stem dalam Bahasa Indonesia)...",
+    "options_id": {{"A": "...", "B": "...", "C": "...", "D": "..."}},
+    "explanation_id": "...(Penjelasan dalam Bahasa Indonesia)...",
+    "evidence": [
+      {{"source": "...", "doc_id": "...", "title": "...", "span_text": "..."}}
+    ],
+    "status": "OK|INSUFFICIENT_EVIDENCE|FAILED_VERIFICATION",
+    "meta": {{
+      "retrieval": {{"...": "..."}},
+      "verification": {{"...": "..."}},
+      "timings_ms": {{"...": 0}}
+    }}
+  }}
+- Never output empty objects or omit required keys.
+- Never leave stem/options/explanation/stem_id/options_id/explanation_id empty.
+- answer_key MUST be a single letter: "A", "B", "C", or "D" (do NOT use "A|B|C|D").
+
+Bilingual rules:
+- stem, options, explanation MUST be in English.
+- stem_id, options_id, explanation_id MUST be accurate, natural Bahasa Indonesia translations.
+- Translate medical terms accurately using standard Indonesian medical terminology (KBBI/IDI conventions).
+- If status=INSUFFICIENT_EVIDENCE, set stem_id to "Bukti tidak mencukupi.", options_id same letters with "Bukti tidak mencukupi." values, explanation_id to "Bukti tidak mencukupi."
+
+Evidence rules:
+- Use only the evidence provided below.
+- evidence.span_text MUST be a verbatim quote of up to 5 sentences from one [E#] entry.
+- evidence.doc_id MUST match the id shown in the chosen [E#] entry.
+- If evidence is insufficient for a question, set status=INSUFFICIENT_EVIDENCE,
+  keep the full schema with non-empty placeholders (use the literal text
+  "Insufficient evidence." for stem/options/explanation), set evidence=[],
+  and still set answer_key to "A".
+- For OK items, include at least 1 evidence entry.
+
+Style rules:
+- Do NOT mention evidence, citations, or [E#] in the stem/stem_id or options/options_id.
+- Avoid meta language such as "according to the evidence" or "based on the evidence".
+- Do NOT use source attribution phrases in stems/options (e.g., "according to", "based on", "the study shows", "evidence suggests").
+- Write stems as natural exam-style questions or short clinical vignettes.
+
+{few_shot_section}
+
+Topic: {topic}
+Competency: {competency}
+
+Evidence:
+{evidence_text}
+"""
+
+
+def get_few_shot_example(competency: str, bilingual: bool = False) -> str:
     """Ambil contoh few-shot berdasarkan kompetensi."""
     competency_lower = competency.strip().lower()
+    if bilingual:
+        return DEFAULT_EXAMPLE_BILINGUAL
     return FEW_SHOT_EXAMPLES.get(competency_lower, DEFAULT_EXAMPLE)
 
 
@@ -238,10 +330,14 @@ def build_prompt(
     n_questions: int,
     extra_instructions: Optional[str] = None,
     include_few_shot: bool = True,
+    language: str = "en",
 ) -> str:
+    bilingual = language in ("both", "id")
+    template = PROMPT_TEMPLATE_BILINGUAL if bilingual else PROMPT_TEMPLATE
+
     # Build few-shot section
     if include_few_shot:
-        example = get_few_shot_example(competency)
+        example = get_few_shot_example(competency, bilingual=bilingual)
         few_shot_section = f"""
 --- EXAMPLE FORMAT ---
 Follow this example format and quality standard:
@@ -252,17 +348,17 @@ NOW GENERATE {n_questions} NEW MCQs FOLLOWING THE ABOVE FORMAT:
 """
     else:
         few_shot_section = ""
-    
-    prompt = PROMPT_TEMPLATE.format(
+
+    prompt = template.format(
         topic=topic.strip(),
         competency=competency.strip(),
         evidence_text=evidence_text.strip(),
         n_questions=n_questions,
         few_shot_section=few_shot_section,
     ).strip()
-    
+
     if extra_instructions:
         prompt = f"{prompt}\n\nAdditional instruction: {extra_instructions.strip()}"
-    
+
     return prompt
 

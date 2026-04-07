@@ -1,5 +1,4 @@
-from __future__ import annotations
-
+import asyncio
 import logging
 from typing import List
 
@@ -17,6 +16,8 @@ from app.services.pipeline import build_failure_batch, run_pipeline_batch, run_p
 
 router = APIRouter()
 LOGGER = logging.getLogger(__name__)
+
+_QUEUE_SENTINEL = object() 
 
 
 @router.get("/health", response_model=HealthResponse)
@@ -53,14 +54,41 @@ async def generate_questions_ws(websocket: WebSocket) -> None:
         await websocket.close(code=1003)
         return
 
+    queue: asyncio.Queue = asyncio.Queue()
+    loop = asyncio.get_event_loop()
+
+    def _run_generator() -> None:
+        try:
+            for event in run_pipeline_stream(payload, include_failed=False):
+                loop.call_soon_threadsafe(queue.put_nowait, event)
+        except Exception as exc:
+            loop.call_soon_threadsafe(
+                queue.put_nowait,
+                {"type": "error", "message": f"pipeline_error: {exc}"},
+            )
+        finally:
+            loop.call_soon_threadsafe(queue.put_nowait, _QUEUE_SENTINEL)
+
     try:
-        for event in run_pipeline_stream(payload, include_failed=False):
-            await websocket.send_json(event)
+        future = loop.run_in_executor(None, _run_generator)
+        while True:
+            event = await queue.get()
+            if event is _QUEUE_SENTINEL:
+                break
+            try:
+                await websocket.send_json(event)
+            except WebSocketDisconnect:
+                future.cancel()
+                return
+        await future  # propagate any unexpected executor exception
     except WebSocketDisconnect:
         return
     except Exception as exc:
         LOGGER.exception("WebSocket pipeline error: %s", exc)
-        await websocket.send_json({"type": "error", "message": f"pipeline_error: {exc}"})
+        try:
+            await websocket.send_json({"type": "error", "message": f"pipeline_error: {exc}"})
+        except Exception:
+            pass
     finally:
         try:
             await websocket.close()

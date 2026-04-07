@@ -32,6 +32,7 @@ class LLMClient:
         groq_api_key: Optional[str] = None,
         cerebras_api_key: Optional[str] = None,
         fallback_targets_json: Optional[str] = None,
+        max_completion_tokens: Optional[int] = None,
     ) -> None:
         self._api_key = api_key or settings.LLM_API_KEY
         self._api_base = api_base or settings.LLM_API_BASE
@@ -44,7 +45,7 @@ class LLMClient:
         ).strip()
         self._temperature = settings.LLM_TEMPERATURE
         self._top_p = settings.LLM_TOP_P
-        self._max_completion_tokens = settings.LLM_MAX_COMPLETION_TOKENS
+        self._max_completion_tokens = max_completion_tokens if max_completion_tokens is not None else settings.LLM_MAX_COMPLETION_TOKENS
         self._reasoning_effort = settings.LLM_REASONING_EFFORT.strip()
         self._stop = settings.LLM_STOP.strip()
         self._stream = settings.LLM_STREAM
@@ -61,6 +62,7 @@ class LLMClient:
         evidence_text: str,
         n_questions: int,
         extra_instructions: Optional[str] = None,
+        language: str = "en",
     ) -> List[QuestionItem]:
         prompt = build_prompt(
             topic,
@@ -68,6 +70,7 @@ class LLMClient:
             evidence_text,
             n_questions,
             extra_instructions=extra_instructions,
+            language=language,
         )
         content = self._chat_completion(prompt)
         if content is None:
@@ -448,7 +451,7 @@ class LLMClient:
             return None
 
         try:
-            client = Groq(api_key=resolved_key)
+            client = Groq(api_key=resolved_key, max_retries=0)
             payload: dict[str, Any] = {
                 "model": model,
                 "messages": [
@@ -457,7 +460,7 @@ class LLMClient:
                 ],
                 "temperature": self._temperature,
                 "top_p": self._top_p,
-                "max_completion_tokens": self._max_completion_tokens,
+                "max_tokens": self._max_completion_tokens,
             }
             if self._stop:
                 payload["stop"] = [s.strip() for s in self._stop.split(",") if s.strip()]
@@ -568,16 +571,22 @@ def _strip_code_fences(text: str) -> str:
 
 
 def _extract_json_block(text: str) -> str:
-    text = _strip_code_fences(text)
-    if "[" in text and "]" in text:
-        start = text.find("[")
-        end = text.rfind("]")
-        return text[start : end + 1]
-    if "{" in text and "}" in text:
-        start = text.find("{")
+    text = _strip_code_fences(text).strip()
+
+    obj_pos = text.find("{")
+    arr_pos = text.find("[")
+
+    if obj_pos == -1 and arr_pos == -1:
+        return text
+
+   
+    if arr_pos == -1 or (obj_pos != -1 and obj_pos < arr_pos):
+        start = obj_pos
         end = text.rfind("}")
         return text[start : end + 1]
-    return text
+    start = arr_pos
+    end = text.rfind("]")
+    return text[start : end + 1]
 
 
 def _repair_json(text: str) -> str:

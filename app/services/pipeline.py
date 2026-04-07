@@ -165,6 +165,7 @@ def _get_reviewer_client() -> Optional[ReviewerClient]:
         groq_api_key=groq_api_key or None,
         cerebras_api_key=cerebras_api_key or None,
         fallback_targets_json=settings.REVIEWER_FALLBACKS,
+        max_completion_tokens=settings.REVIEWER_MAX_COMPLETION_TOKENS,
     )
     return ReviewerClient(reviewer_llm, model_name=model)
 
@@ -200,6 +201,7 @@ def _create_reviewer_from_config(
             groq_api_key=groq_api_key or None,
             cerebras_api_key=cerebras_api_key or None,
             fallback_targets_json=fallbacks_json,
+            max_completion_tokens=settings.REVIEWER_MAX_COMPLETION_TOKENS,
         )
         return ReviewerClient(llm_client, model_name=model)
     except Exception as exc:
@@ -746,6 +748,7 @@ def _generate_single_question(
             evidence_text,
             candidate_count,
             extra_instructions=combined_instructions,
+            language=item.language,
         )
         prompt_hash = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
         llm_start = time.perf_counter()
@@ -755,6 +758,7 @@ def _generate_single_question(
             evidence_text,
             candidate_count,
             extra_instructions=combined_instructions,
+            language=item.language,
         )
         llm_ms = (time.perf_counter() - llm_start) * 1000.0
 

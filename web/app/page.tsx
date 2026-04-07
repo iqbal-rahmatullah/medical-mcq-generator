@@ -1,45 +1,52 @@
-'use client'
+"use client"
 
-import { useMemo, useState } from 'react'
+import { useMemo, useState } from "react"
 
-import FormField from '../components/FormField'
-import Footer from '../components/Footer'
-import Navbar from '../components/Navbar'
-import QuestionCard from '../components/QuestionCard'
-import SectionCard from '../components/SectionCard'
-import ToggleSwitch from '../components/ToggleSwitch'
-import { useQuestionGenerator } from './hooks/useQuestionGenerator'
-import { COMPETENCY_OPTIONS } from './lib/constants'
-import type { Options } from './lib/generate'
-import { buildGeneratePayload } from './lib/generate'
-import type { TopicEntry } from './lib/types'
+import FormField from "../components/FormField"
+import Footer from "../components/Footer"
+import Navbar from "../components/Navbar"
+import QuestionCard from "../components/QuestionCard"
+import SectionCard from "../components/SectionCard"
+import ToggleSwitch from "../components/ToggleSwitch"
+import { useQuestionGenerator } from "./hooks/useQuestionGenerator"
+import { COMPETENCY_OPTIONS } from "./lib/constants"
+import type { Options } from "./lib/generate"
+import { buildGeneratePayload } from "./lib/generate"
+import type { TopicEntry } from "./lib/types"
 
 export default function HomePage() {
   const [topics, setTopics] = useState<TopicEntry[]>([
     {
-      id: 'topic-1',
-      topic: 'Cardiology',
-      competency: 'Diagnosis',
+      id: "topic-1",
+      topic: "Cardiology",
+      competency: "Diagnosis",
       n_questions: 5,
     },
   ])
   const { results, loading, error, progress, failedCount, generate, cancel } =
     useQuestionGenerator()
   const [showAnswers, setShowAnswers] = useState(true)
+  const [displayLanguage, setDisplayLanguage] = useState<"en" | "id">("en")
 
   const questionCards = useMemo(() => {
     return results.map((question, index) => {
-      const options: Options = question.options || {
-        A: '-',
-        B: '-',
-        C: '-',
-        D: '-',
-      }
+      const useIndonesian = displayLanguage === "id"
+      const stem =
+        useIndonesian && question.stem_id ? question.stem_id : question.stem
+      const rawOptions = question.options
+      const rawOptionsId = question.options_id
+      const resolvedOptions: Options =
+        useIndonesian && rawOptionsId ? rawOptionsId : rawOptions
+      const explanation =
+        useIndonesian && question.explanation_id
+          ? question.explanation_id
+          : question.explanation
+
       const evidenceItems = (question.evidence || [])
         .map((item) => {
-          const docId = item.doc_id || ''
-          const source = item.source || ''
-          const span = item.span_text || ''
+          const docId = item.doc_id || ""
+          const source = item.source || ""
+          const span = item.span_text || ""
           return {
             docId,
             source,
@@ -50,37 +57,37 @@ export default function HomePage() {
 
       return {
         index: index + 1,
-        prompt: question.stem || 'Question text unavailable.',
-        topic: question.topic || '',
-        competency: question.competency || '',
+        prompt: stem || "Question text unavailable.",
+        topic: question.topic || "",
+        competency: question.competency || "",
         options: [
-          { key: 'A' as const, text: options.A || '-' },
-          { key: 'B' as const, text: options.B || '-' },
-          { key: 'C' as const, text: options.C || '-' },
-          { key: 'D' as const, text: options.D || '-' },
+          { key: "A" as const, text: resolvedOptions.A || "-" },
+          { key: "B" as const, text: resolvedOptions.B || "-" },
+          { key: "C" as const, text: resolvedOptions.C || "-" },
+          { key: "D" as const, text: resolvedOptions.D || "-" },
         ],
         selectedKey: showAnswers ? question.answer_key : undefined,
-        explanation: question.explanation || '',
+        explanation: explanation || "",
         evidence: evidenceItems.length
           ? {
-              label: 'Source Evidence / RAG Context',
+              label: "Source Evidence / RAG Context",
               items: evidenceItems,
             }
           : undefined,
         status: question.status,
       }
     })
-  }, [results, showAnswers])
+  }, [results, showAnswers, displayLanguage])
 
   const handleTopicChange = (
     id: string,
     field: keyof TopicEntry,
-    value: string | number
+    value: string | number,
   ) => {
     setTopics((prev) =>
       prev.map((topic) =>
-        topic.id === id ? { ...topic, [field]: value } : topic
-      )
+        topic.id === id ? { ...topic, [field]: value } : topic,
+      ),
     )
   }
 
@@ -89,8 +96,8 @@ export default function HomePage() {
       ...prev,
       {
         id: `topic-${Date.now()}`,
-        topic: '',
-        competency: 'Diagnosis',
+        topic: "",
+        competency: "Diagnosis",
         n_questions: 5,
       },
     ])
@@ -134,8 +141,8 @@ export default function HomePage() {
                         onChange={(event) =>
                           handleTopicChange(
                             topic.id,
-                            'topic',
-                            event.target.value
+                            "topic",
+                            event.target.value,
                           )
                         }
                         placeholder='Cardiology'
@@ -148,8 +155,8 @@ export default function HomePage() {
                         onChange={(event) =>
                           handleTopicChange(
                             topic.id,
-                            'competency',
-                            event.target.value
+                            "competency",
+                            event.target.value,
                           )
                         }
                       >
@@ -169,11 +176,11 @@ export default function HomePage() {
                         onChange={(event) =>
                           handleTopicChange(
                             topic.id,
-                            'n_questions',
+                            "n_questions",
                             Math.max(
                               1,
-                              Number.parseInt(event.target.value, 10) || 1
-                            )
+                              Number.parseInt(event.target.value, 10) || 1,
+                            ),
                           )
                         }
                       />
@@ -182,7 +189,11 @@ export default function HomePage() {
                 ))}
               </div>
 
-              <button type='button' className='ghost-button' onClick={handleAddTopic}>
+              <button
+                type='button'
+                className='ghost-button'
+                onClick={handleAddTopic}
+              >
                 + Add Another Topic
               </button>
 
@@ -192,7 +203,7 @@ export default function HomePage() {
                 onClick={handleGenerate}
                 disabled={loading}
               >
-                {loading ? 'Generating...' : 'Generate Questions'}
+                {loading ? "Generating..." : "Generate Questions"}
               </button>
               {loading ? (
                 <button
@@ -207,8 +218,9 @@ export default function HomePage() {
               {error ? <p className='form-error'>{error}</p> : null}
               {loading && progress ? (
                 <p className='form-muted'>
-                  Generating {progress.completed} of {progress.total} questions...
-                  {failedCount ? ` ${failedCount} failed validation.` : ''}
+                  Generating {progress.completed} of {progress.total}{" "}
+                  questions...
+                  {failedCount ? ` ${failedCount} failed validation.` : ""}
                 </p>
               ) : null}
             </SectionCard>
@@ -216,11 +228,45 @@ export default function HomePage() {
             <SectionCard
               title='Generated Questions'
               action={
-                <ToggleSwitch
-                  label='Show correct answers'
-                  checked={showAnswers}
-                  onChange={setShowAnswers}
-                />
+                <div className='section-actions'>
+                  <div
+                    className='language-selector'
+                    role='group'
+                    aria-label='Display language'
+                  >
+                    <label
+                      className={`lang-radio-label${displayLanguage === "en" ? " active" : ""}`}
+                    >
+                      <input
+                        type='radio'
+                        name='display-language'
+                        value='en'
+                        checked={displayLanguage === "en"}
+                        onChange={() => setDisplayLanguage("en")}
+                        className='lang-radio-input'
+                      />
+                      🇬🇧 EN
+                    </label>
+                    <label
+                      className={`lang-radio-label${displayLanguage === "id" ? " active" : ""}`}
+                    >
+                      <input
+                        type='radio'
+                        name='display-language'
+                        value='id'
+                        checked={displayLanguage === "id"}
+                        onChange={() => setDisplayLanguage("id")}
+                        className='lang-radio-input'
+                      />
+                      🇮🇩 ID
+                    </label>
+                  </div>
+                  <ToggleSwitch
+                    label='Show correct answers'
+                    checked={showAnswers}
+                    onChange={setShowAnswers}
+                  />
+                </div>
               }
             >
               {results.length ? (

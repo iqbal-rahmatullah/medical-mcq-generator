@@ -647,12 +647,10 @@ p {
   width: min(220px, 70%);
   height: 6px;
   border-radius: 999px;
-  background: linear-gradient(
-    90deg,
-    rgba(29, 107, 255, 0.12),
-    rgba(29, 107, 255, 0.45),
-    rgba(29, 107, 255, 0.12)
-  );
+  background: linear-gradient(90deg,
+      rgba(29, 107, 255, 0.12),
+      rgba(29, 107, 255, 0.45),
+      rgba(29, 107, 255, 0.12));
   background-size: 220% 100%;
   animation: shimmer 1.4s ease-in-out infinite;
 }
@@ -664,11 +662,13 @@ p {
 }
 
 @keyframes core-pulse {
+
   0%,
   100% {
     transform: scale(1);
     box-shadow: 0 0 0 6px rgba(29, 107, 255, 0.08);
   }
+
   50% {
     transform: scale(1.08);
     box-shadow: 0 0 0 10px rgba(29, 107, 255, 0.14);
@@ -679,6 +679,7 @@ p {
   0% {
     background-position: 0% 50%;
   }
+
   100% {
     background-position: 100% 50%;
   }
@@ -972,5 +973,65 @@ p {
 
   .nav-actions {
     width: 100%;
+  }
+}
+
+.section-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.language-selector {
+  display: inline-flex;
+  align-items: center;
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 3px;
+  gap: 2px;
+}
+
+.lang-radio-input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+
+.lang-radio-label {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+  transition: background 160ms ease, color 160ms ease, box-shadow 160ms ease;
+  white-space: nowrap;
+  letter-spacing: 0.03em;
+}
+
+.lang-radio-label:hover {
+  color: var(--ink);
+}
+
+.lang-radio-label.active {
+  background: var(--accent);
+  color: #ffffff;
+  box-shadow: 0 4px 12px rgba(29, 107, 255, 0.3);
+}
+
+@media (max-width: 640px) {
+  .section-actions {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
   }
 }

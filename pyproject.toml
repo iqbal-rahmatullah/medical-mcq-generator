@@ -5,11 +5,18 @@ description = "Kerangka FastAPI untuk sistem AQG medis"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
+  "cerebras-cloud-sdk>=1.0",
   "fastapi>=0.110",
   "groq>=0.9",
+  "numpy>=1.24",
   "pydantic-settings>=2.2",
-  "uvicorn>=0.27",
+  "torch>=2.0",
+  "transformers>=4.35",
+  "uvicorn[standard]>=0.27",
 ]
+
+[tool.setuptools.packages.find]
+include = ["app*"]
 
 [tool.uvicorn]
 factory = false
