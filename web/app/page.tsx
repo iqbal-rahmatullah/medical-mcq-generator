@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 
 import FormField from "../components/FormField"
 import Footer from "../components/Footer"
@@ -10,6 +10,7 @@ import SectionCard from "../components/SectionCard"
 import ToggleSwitch from "../components/ToggleSwitch"
 import { useQuestionGenerator } from "./hooks/useQuestionGenerator"
 import { COMPETENCY_OPTIONS } from "./lib/constants"
+import { exportDOCX, exportJSON, exportPDF } from "./lib/export"
 import type { Options } from "./lib/generate"
 import { buildGeneratePayload } from "./lib/generate"
 import type { TopicEntry } from "./lib/types"
@@ -27,6 +28,8 @@ export default function HomePage() {
     useQuestionGenerator()
   const [showAnswers, setShowAnswers] = useState(true)
   const [displayLanguage, setDisplayLanguage] = useState<"en" | "id">("en")
+  const [exportOpen, setExportOpen] = useState(false)
+  const exportRef = useRef<HTMLDivElement>(null)
 
   const questionCards = useMemo(() => {
     return results.map((question, index) => {
@@ -111,6 +114,24 @@ export default function HomePage() {
     const payload = buildGeneratePayload(topics)
     generate(payload)
   }
+
+  const handleExport = (format: "json" | "pdf" | "docx") => {
+    setExportOpen(false)
+    if (format === "json") exportJSON(results, displayLanguage)
+    else if (format === "pdf") exportPDF(results, displayLanguage)
+    else exportDOCX(results, displayLanguage)
+  }
+
+  useEffect(() => {
+    if (!exportOpen) return
+    const handler = (e: MouseEvent) => {
+      if (exportRef.current && !exportRef.current.contains(e.target as Node)) {
+        setExportOpen(false)
+      }
+    }
+    document.addEventListener("mousedown", handler)
+    return () => document.removeEventListener("mousedown", handler)
+  }, [exportOpen])
 
   return (
     <div className='app-shell'>
@@ -266,6 +287,66 @@ export default function HomePage() {
                     checked={showAnswers}
                     onChange={setShowAnswers}
                   />
+                  {results.length > 0 && !loading ? (
+                    <div
+                      className='export-dropdown'
+                      ref={exportRef}
+                    >
+                      <button
+                        id='export-btn'
+                        type='button'
+                        className='export-trigger'
+                        onClick={() => setExportOpen((o) => !o)}
+                        aria-haspopup='true'
+                        aria-expanded={exportOpen}
+                      >
+                        <span>⬇</span> Export
+                      </button>
+                      {exportOpen ? (
+                        <div className='export-menu' role='menu'>
+                          <button
+                            id='export-json-btn'
+                            type='button'
+                            className='export-menu-item'
+                            role='menuitem'
+                            onClick={() => handleExport("json")}
+                          >
+                            <span className='export-icon'>{ }</span>
+                            <span>
+                              <strong>JSON</strong>
+                              <small>Raw data</small>
+                            </span>
+                          </button>
+                          <button
+                            id='export-pdf-btn'
+                            type='button'
+                            className='export-menu-item'
+                            role='menuitem'
+                            onClick={() => handleExport("pdf")}
+                          >
+                            <span className='export-icon'>📕</span>
+                            <span>
+                              <strong>PDF</strong>
+                              <small>Print-ready exam</small>
+                            </span>
+                          </button>
+                          <button
+                            id='export-docx-btn'
+                            type='button'
+                            className='export-menu-item'
+                            role='menuitem'
+                            onClick={() => handleExport("docx")}
+                          >
+                            <span className='export-icon'>📘</span>
+                            <span>
+                              <strong>DOCX</strong>
+                              <small>Editable document</small>
+                            </span>
+                          </button>
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
                 </div>
               }
             >
