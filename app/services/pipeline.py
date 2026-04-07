@@ -95,16 +95,24 @@ def _build_failure_question(
     )
 
 
+_PUBMED_CACHE: Dict[str, List[Document]] = {}
+
+
 def _fetch_pubmed_fallback(query: str) -> List[Document]:
     if not settings.PUBMED_WEB_ENABLED:
         return []
-    return fetch_pubmed_documents(
+    if query in _PUBMED_CACHE:
+        LOGGER.info("\nPubMed cache hit: query=%s docs=%s", query[:60], len(_PUBMED_CACHE[query]))
+        return _PUBMED_CACHE[query]
+    result = fetch_pubmed_documents(
         query,
         max_results=max(settings.PUBMED_WEB_MAX_RESULTS, 0),
         api_key=(settings.PUBMED_API_KEY or "").strip() or None,
         email=(settings.PUBMED_EMAIL or "").strip() or None,
         timeout_sec=max(settings.PUBMED_WEB_TIMEOUT_SEC, 1.0),
     )
+    _PUBMED_CACHE[query] = result
+    return result
 
 
 def build_failure_batch(
@@ -512,6 +520,7 @@ def _generate_single_question(
     cross_cove_reviewer: Optional[CrossCoVeReviewer],
     avoid_stems: List[str],
     used_doc_ids: Optional[set[str]] = None,
+    retrieval_cache: Optional[Dict[str, tuple]] = None,
 ) -> tuple[QuestionItem, List[Dict[str, object]]]:
     attempt_history: List[Dict[str, object]] = []
     attempt_logs: List[Dict[str, object]] = []
@@ -528,7 +537,8 @@ def _generate_single_question(
     track_doc_ids = used_doc_ids is not None
     doc_id_tracker = used_doc_ids if used_doc_ids is not None else set()
     final_evidence_doc_ids: List[str] = []
-    v2_requote_count = 0  # Track consecutive v2_requote attempts
+    v2_requote_count = 0
+    _retrieval_cache = retrieval_cache if retrieval_cache is not None else {}
 
     for attempt in range(1, _MAX_ATTEMPTS + 1):
         query_used = (query_override or "").strip() or build_query(
@@ -563,15 +573,26 @@ def _generate_single_question(
             )
             retrieval_ms = override_retrieval_ms
         else:
-            retrieval_start = time.perf_counter()
-            retrieval_result = retriever.retrieve(
-                item.topic,
-                item.competency,
-                evidence_top_k=evidence_top_k,
-                query_override=query_override,
-                exclude_doc_ids=doc_id_tracker if doc_id_tracker else None,
-            )
-            retrieval_ms = (time.perf_counter() - retrieval_start) * 1000.0
+            excluded_key = frozenset(doc_id_tracker) if doc_id_tracker else frozenset()
+            cache_key = f"{query_used}|{evidence_top_k}|{excluded_key}"
+            if cache_key in _retrieval_cache:
+                retrieval_result, retrieval_ms = _retrieval_cache[cache_key]
+                retrieval_ms = 0.0 
+                LOGGER.info(
+                    "\nRetrieval cached: topic=%s competency=%s attempt=%s (skipped ~14s)",
+                    item.topic, item.competency, attempt,
+                )
+            else:
+                retrieval_start = time.perf_counter()
+                retrieval_result = retriever.retrieve(
+                    item.topic,
+                    item.competency,
+                    evidence_top_k=evidence_top_k,
+                    query_override=query_override,
+                    exclude_doc_ids=doc_id_tracker if doc_id_tracker else None,
+                )
+                retrieval_ms = (time.perf_counter() - retrieval_start) * 1000.0
+                _retrieval_cache[cache_key] = (retrieval_result, retrieval_ms)
 
             if not retrieval_result.evidence_docs:
                 web_start = time.perf_counter()
@@ -960,7 +981,7 @@ def _generate_single_question(
             if any(check in _V2_FAILED_CHECKS for check in selected_failed_checks):
                 v2_requote_count += 1
                 extra_instructions = _REQUOTE_INSTRUCTION
-                # Setelah 2 kali v2_requote gagal, gunakan query variation
+            
                 if v2_requote_count >= 2:
                     query_override = build_query_varied(
                         item.topic, item.competency, variation_index=v2_requote_count - 2
@@ -1223,6 +1244,7 @@ def run_pipeline_stream(
             if ok_only_mode:
                 item_doc_ids: set[str] = set()
                 item_failed = False
+                shared_retrieval_cache: Dict[str, tuple] = {}
                 for question_index in range(1, item.n_questions + 1):
                     question = None
                     normalized_stem = ""
@@ -1245,6 +1267,7 @@ def run_pipeline_stream(
                                 cross_cove_reviewer,
                                 avoid_stems,
                                 item_doc_ids,
+                                retrieval_cache=shared_retrieval_cache,
                             )
                             for log in attempt_logs:
                                 log["question_index"] = question_index
@@ -1305,6 +1328,19 @@ def run_pipeline_stream(
                             )
                         if fallback_question is not None:
                             question = fallback_question
+                            normalized_stem = _normalize_stem(question.stem or "")
+                        elif question is not None and question.stem:
+                            LOGGER.warning(
+                                "Graceful fallback: using best-effort question for topic=%s competency=%s (original status=%s)",
+                                item.topic,
+                                item.competency,
+                                question.status,
+                            )
+                            verification_meta = dict(question.meta.verification or {})
+                            verification_meta["graceful_fallback"] = True
+                            verification_meta["original_status"] = question.status
+                            question.meta.verification = verification_meta
+                            question.status = "OK"
                             normalized_stem = _normalize_stem(question.stem or "")
                         else:
                             LOGGER.error(

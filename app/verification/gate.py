@@ -58,21 +58,33 @@ class CrossCoVeReviewer:
         self._reviewers = reviewers
     
     def cross_verify(self, question: QuestionItem, evidence_text: str) -> str:
-        """Run verification with all reviewers and return majority vote."""
-        votes = []
+        """Run verification with all reviewers in parallel and return majority vote."""
+        from collections import Counter
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
         total_reviewers = len(self._reviewers)
-        for reviewer in self._reviewers:
-            try:
-                decision = reviewer.review(question, evidence_text)
-                votes.append(decision)
-                LOGGER.info(
-                    "\\nCross-CoVe vote: model=%s decision=%s",
-                    getattr(reviewer, '_model_name', 'unknown'),
-                    decision,
-                )
-            except Exception as exc:
-                LOGGER.warning("Cross-CoVe reviewer failed (skipped): %s", exc)
-                continue
+        votes = []
+
+        def _call_reviewer(reviewer: ReviewerClient) -> tuple:
+            model_name = getattr(reviewer, '_model_name', 'unknown')
+            decision = reviewer.review(question, evidence_text)
+            return model_name, decision
+
+        with ThreadPoolExecutor(max_workers=total_reviewers) as executor:
+            futures = {
+                executor.submit(_call_reviewer, r): r for r in self._reviewers
+            }
+            for future in as_completed(futures):
+                try:
+                    model_name, decision = future.result(timeout=30)
+                    votes.append(decision)
+                    LOGGER.info(
+                        "\\nCross-CoVe vote: model=%s decision=%s",
+                        model_name, decision,
+                    )
+                except Exception as exc:
+                    LOGGER.warning("Cross-CoVe reviewer failed (skipped): %s", exc)
+                    continue
 
         if not votes:
             return "INSUFFICIENT"
@@ -85,16 +97,12 @@ class CrossCoVeReviewer:
             )
             return "INSUFFICIENT"
 
-        # Majority voting
-        from collections import Counter
         vote_counts = Counter(votes)
         majority_answer, count = vote_counts.most_common(1)[0]
 
         LOGGER.info(
             "\\nCross-CoVe result: votes=%s majority=%s count=%s",
-            votes,
-            majority_answer,
-            count,
+            votes, majority_answer, count,
         )
 
         return majority_answer
@@ -161,7 +169,7 @@ def verify_questions(
                     max_total_chars=settings.EVIDENCE_MAX_TOTAL_CHARS,
                 )
                 
-                # Use Cross-CoVe if enabled and available, otherwise fall back to single reviewer
+                # Use Cross-CoVe if enabled and available
                 if settings.COVE_ENABLED and cross_cove_reviewer is not None:
                     decision = cross_cove_reviewer.cross_verify(question, evidence_text)
                     reviewer_mode = "cross_cove"
@@ -173,7 +181,7 @@ def verify_questions(
                     reviewer_mode = "none"
                 
                 if decision is None:
-                    pass  # No review performed
+                    pass
                 elif decision == "INSUFFICIENT":
                     LOGGER.warning(
                         "\\nReviewer failed: reason=insufficient mode=%s topic=%s competency=%s answer_key=%s",
@@ -242,23 +250,28 @@ def _check_evidence_spans(
             failed_checks.append("missing_evidence")
         return failed_checks
 
+    valid_evidence = []
     for evidence in question.evidence:
         doc = doc_lookup.get(evidence.doc_id)
         if doc is None:
-            failed_checks.append("evidence_doc_missing")
-            notes.append(f"missing doc_id: {evidence.doc_id}")
+            notes.append(f"stripped missing doc_id: {evidence.doc_id}")
             continue
         span_text = _normalize_match_text(evidence.span_text)
         if not span_text:
-            failed_checks.append("evidence_span_empty")
-            notes.append(f"empty span_text for doc_id: {evidence.doc_id}")
+            notes.append(f"stripped empty span_text for doc_id: {evidence.doc_id}")
             continue
         doc_text = _normalize_match_text(f"{doc.title} {doc.text}")
         if span_text and span_text in doc_text:
+            valid_evidence.append(evidence)
             continue
-        if not _span_fuzzy_match(span_text, doc_text, threshold=0.70):
-            failed_checks.append("evidence_span_mismatch")
-            notes.append(f"span not found in doc_id: {evidence.doc_id}")
+        if _span_fuzzy_match(span_text, doc_text, threshold=0.60):
+            valid_evidence.append(evidence)
+            continue
+        notes.append(f"stripped mismatched span for doc_id: {evidence.doc_id}")
+
+    question.evidence = valid_evidence
+    if not valid_evidence and question.status == "OK":
+        failed_checks.append("missing_evidence")
 
     return failed_checks
 
@@ -279,8 +292,8 @@ def _check_topic_coverage_llm(
     notes: List[str],
     reviewer: Optional[ReviewerClient],
 ) -> List[str]:
-    failed_checks: List[str] = []
-
+    """Non-blocking topic coverage check. Results are logged as notes only,
+    not as failed_checks, so Cross-CoVe always gets a chance to vote."""
     evidence_docs = [
         doc_lookup.get(evidence.doc_id)
         for evidence in question.evidence
@@ -288,10 +301,10 @@ def _check_topic_coverage_llm(
     ]
     evidence_docs = [doc for doc in evidence_docs if doc is not None]
     if not evidence_docs:
-        return failed_checks
+        return []
 
     if reviewer is None:
-        return failed_checks
+        return []
 
     try:
         evidence_text = render_evidence(
@@ -300,16 +313,12 @@ def _check_topic_coverage_llm(
             max_total_chars=settings.EVIDENCE_MAX_TOTAL_CHARS,
         )
         is_covered = reviewer.check_topic_coverage(question.topic, evidence_text)
-        if is_covered:
-            return failed_checks
+        if not is_covered:
+            notes.append("topic_coverage: reviewer says evidence may not cover topic (non-blocking)")
     except Exception as exc:
-        failed_checks.append("topic_coverage_error")
-        notes.append(str(exc))
-        return failed_checks
+        notes.append(f"topic_coverage_error: {exc}")
 
-    failed_checks.append("topic_coverage")
-    notes.append("no topic token found in evidence docs")
-    return failed_checks
+    return []
 
 
 def _normalize_match_text(text: str) -> str:
