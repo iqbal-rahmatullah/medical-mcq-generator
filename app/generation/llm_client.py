@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import ssl
 import urllib.error
 import urllib.request
 from typing import Any, Dict, List, Optional
@@ -390,14 +391,13 @@ class LLMClient:
             "temperature": self._temperature,
             "top_p": self._top_p,
             "max_completion_tokens": self._max_completion_tokens,
+            "max_tokens": self._max_completion_tokens,
             "stream": self._stream,
         }
         if self._reasoning_effort:
             payload["reasoning_effort"] = self._reasoning_effort
         if self._stop:
             payload["stop"] = [s.strip() for s in self._stop.split(",") if s.strip()]
-        else:
-            payload["stop"] = None
 
         body = json.dumps(payload).encode("utf-8")
         headers = {
@@ -408,8 +408,15 @@ class LLMClient:
             api_base, data=body, headers=headers, method="POST"
         )
 
+        # Build SSL context using certifi CA bundle
         try:
-            with urllib.request.urlopen(request, timeout=self._timeout_sec) as response:
+            import certifi
+            ssl_ctx = ssl.create_default_context(cafile=certifi.where())
+        except ImportError:
+            ssl_ctx = ssl.create_default_context()
+
+        try:
+            with urllib.request.urlopen(request, timeout=self._timeout_sec, context=ssl_ctx) as response:
                 raw = response.read().decode("utf-8")
         except urllib.error.HTTPError as exc:
             LOGGER.error("LLM HTTP error: %s", exc)
@@ -428,9 +435,34 @@ class LLMClient:
             return None
 
         try:
-            return data["choices"][0]["message"]["content"]
+            content = data["choices"][0]["message"]["content"]
+            if isinstance(content, str):
+                pass 
+            elif isinstance(content, dict):
+                LOGGER.debug("LLM content is dict, serializing to JSON string")
+                content = json.dumps(content)
+            elif isinstance(content, list):
+                LOGGER.debug("LLM content is list (%d parts), extracting text", len(content))
+                parts = []
+                for part in content:
+                    if isinstance(part, str):
+                        parts.append(part)
+                    elif isinstance(part, dict):
+                        # e.g. {"type": "text", "text": "..."} format
+                        parts.append(part.get("text") or json.dumps(part))
+                content = "\n".join(parts) if parts else json.dumps(content)
+            elif content is None:
+                # Some reasoning models put the answer in reasoning_content
+                content = (
+                    data["choices"][0]["message"].get("reasoning_content")
+                    or data["choices"][0].get("text")
+                    or ""
+                )
+            else:
+                content = str(content)
+            return content or None
         except (KeyError, IndexError, TypeError):
-            LOGGER.error("LLM response missing content")
+            LOGGER.error("LLM response missing content: %s", raw[:200])
             self._last_error_kind = "response_error"
             return None
 
@@ -439,7 +471,7 @@ class LLMClient:
     ) -> Optional[str]:
         try:
             from groq import Groq
-        except Exception as exc:  # pragma: no cover - optional dependency
+        except Exception as exc:
             LOGGER.error("groq is not installed: %s", exc)
             self._last_error_kind = "dependency_error"
             return None

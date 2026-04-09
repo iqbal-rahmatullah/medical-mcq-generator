@@ -1,5 +1,7 @@
 import asyncio
 import logging
+import time
+from datetime import datetime, timezone
 from typing import List
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
@@ -56,6 +58,15 @@ async def generate_questions_ws(websocket: WebSocket) -> None:
 
     queue: asyncio.Queue = asyncio.Queue()
     loop = asyncio.get_event_loop()
+    start_time = time.perf_counter()
+    start_dt = datetime.now(timezone.utc)
+    total_requested = sum(item.n_questions for item in payload)
+    LOGGER.info(
+        "WS generate START: topics=%d questions=%d start=%s",
+        len(payload),
+        total_requested,
+        start_dt.strftime("%Y-%m-%dT%H:%M:%S UTC"),
+    )
 
     def _run_generator() -> None:
         try:
@@ -90,6 +101,16 @@ async def generate_questions_ws(websocket: WebSocket) -> None:
         except Exception:
             pass
     finally:
+        elapsed = time.perf_counter() - start_time
+        end_dt = datetime.now(timezone.utc)
+        LOGGER.info(
+            "WS generate END: topics=%d questions=%d start=%s end=%s elapsed=%.2fs",
+            len(payload),
+            total_requested,
+            start_dt.strftime("%Y-%m-%dT%H:%M:%S UTC"),
+            end_dt.strftime("%Y-%m-%dT%H:%M:%S UTC"),
+            elapsed,
+        )
         try:
             await websocket.close()
         except RuntimeError:

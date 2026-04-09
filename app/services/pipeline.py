@@ -10,6 +10,7 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Iterator, List, Optional
+import hashlib
 
 from app.core.config import settings
 from app.corpus.loaders import load_pubmed_hf, load_textbooks_hf
@@ -28,6 +29,7 @@ from app.schemas.response import Meta, Options, QuestionItem, QuestionStatus
 from app.logging.logger import log_run
 from app.logging.question_bank import append_question_bank, load_question_bank
 from app.verification.gate import CrossCoVeReviewer, ReviewerClient, VerificationResult, verify_questions
+from app.schemas.response import EvidenceItem
 
 LOGGER = logging.getLogger(__name__)
 
@@ -183,6 +185,7 @@ def _create_reviewer_from_config(
     api_key: str,
     model: str,
     fallbacks_json: str = "",
+    api_base: str = "",
 ) -> Optional[ReviewerClient]:
     """Create a single reviewer client from config with fallback support."""
     if not model or not provider:
@@ -202,7 +205,7 @@ def _create_reviewer_from_config(
     try:
         llm_client = LLMClient(
             api_key=api_key or None,
-            api_base=None,
+            api_base=api_base or None,
             model=model,
             timeout_sec=timeout_sec,
             provider=provider_lower or None,
@@ -230,6 +233,7 @@ def _get_cross_cove_reviewer() -> Optional[CrossCoVeReviewer]:
         settings.REVIEWER_1_API_KEY or settings.REVIEWER_API_KEY,
         settings.REVIEWER_1_MODEL or settings.REVIEWER_MODEL,
         settings.REVIEWER_1_FALLBACKS,
+        api_base=settings.REVIEWER_1_API_BASE or settings.REVIEWER_API_BASE or "",
     )
     if r1:
         reviewers.append(r1)
@@ -240,6 +244,7 @@ def _get_cross_cove_reviewer() -> Optional[CrossCoVeReviewer]:
         settings.REVIEWER_2_API_KEY or settings.REVIEWER_API_KEY,
         settings.REVIEWER_2_MODEL,
         settings.REVIEWER_2_FALLBACKS,
+        api_base=settings.REVIEWER_2_API_BASE or settings.REVIEWER_API_BASE or "",
     )
     if r2:
         reviewers.append(r2)
@@ -250,6 +255,7 @@ def _get_cross_cove_reviewer() -> Optional[CrossCoVeReviewer]:
         settings.REVIEWER_3_API_KEY or settings.REVIEWER_API_KEY,
         settings.REVIEWER_3_MODEL,
         settings.REVIEWER_3_FALLBACKS,
+        api_base=settings.REVIEWER_3_API_BASE or settings.REVIEWER_API_BASE or "",
     )
     if r3:
         reviewers.append(r3)
@@ -296,6 +302,72 @@ def _summarize_verification_results(
 
 def _normalize_stem(value: str) -> str:
     return " ".join(value.strip().lower().split())
+
+
+def _exact_question_hash(question: "QuestionItem") -> str:
+    opts = question.options
+    content = "|".join([
+        _normalize_stem(question.stem or ""),
+        _normalize_stem(opts.A or ""),
+        _normalize_stem(opts.B or ""),
+        _normalize_stem(opts.C or ""),
+        _normalize_stem(opts.D or ""),
+        (question.answer_key or "").upper(),
+    ])
+    return hashlib.sha256(content.encode()).hexdigest()
+
+
+def _reattach_evidence_from_cache(
+    question: "QuestionItem",
+    retrieval_cache: Dict[str, tuple],
+) -> None:
+    """Re-attach evidence to a question with empty evidence using cached retrieval docs."""
+    if question.evidence:
+        return
+    if not retrieval_cache:
+        return
+
+    stem_words = set(question.stem.lower().split())
+
+    best_docs = []
+    for _cache_key, (retrieval_result, _ms) in retrieval_cache.items():
+        if not hasattr(retrieval_result, "evidence_docs"):
+            continue
+        for doc in retrieval_result.evidence_docs:
+            text = getattr(doc, "text", "") or ""
+            doc_words = set(text.lower().split())
+            overlap = len(stem_words & doc_words) / max(len(stem_words), 1)
+            best_docs.append((overlap, doc))
+
+    best_docs.sort(key=lambda x: x[0], reverse=True)
+
+    attached = []
+    for score, doc in best_docs[:3]:
+        if score < 0.05:
+            continue
+        text_snippet = (getattr(doc, "text", "") or "")[:500]
+        source = "textbook"
+        doc_id = getattr(doc, "doc_id", "")
+        if "pubmed_web" in doc_id:
+            source = "pubmed_web"
+        elif "pubmed" in doc_id:
+            source = "pubmed"
+        attached.append(
+            EvidenceItem(
+                source=source,
+                doc_id=doc_id,
+                title=getattr(doc, "title", "") or "",
+                span_text=text_snippet,
+            )
+        )
+
+    if attached:
+        question.evidence = attached
+        LOGGER.info(
+            "Evidence re-attached: stem=%s docs=%d",
+            _truncate_log(question.stem, 80),
+            len(attached),
+        )
 
 
 def _truncate_log(value: str, limit: int = 160) -> str:
@@ -1047,6 +1119,7 @@ def run_pipeline_stream(
     completed = 0
     run_used_stems: List[str] = []
     run_used_normalized = set()
+    run_used_hashes: set[str] = set()
     run_used_doc_ids = set()
     ok_only_mode = settings.OK_ONLY_MODE
     ok_only_max_rounds = max(settings.OK_ONLY_MAX_ROUNDS, 1)
@@ -1245,6 +1318,7 @@ def run_pipeline_stream(
                 item_doc_ids: set[str] = set()
                 item_failed = False
                 shared_retrieval_cache: Dict[str, tuple] = {}
+                last_best_question = None
                 for question_index in range(1, item.n_questions + 1):
                     question = None
                     normalized_stem = ""
@@ -1303,6 +1377,8 @@ def run_pipeline_stream(
                             break
                         if question is None:
                             break
+                        if question.stem:
+                            last_best_question = question
                         if question.status == "OK":
                             break
                         time_exceeded = False
@@ -1342,6 +1418,22 @@ def run_pipeline_stream(
                             question.meta.verification = verification_meta
                             question.status = "OK"
                             normalized_stem = _normalize_stem(question.stem or "")
+                            _reattach_evidence_from_cache(question, shared_retrieval_cache)
+                        elif last_best_question is not None and last_best_question.stem:
+                            question = last_best_question
+                            LOGGER.warning(
+                                "Graceful fallback (from last_best): using best-effort question for topic=%s competency=%s (original status=%s)",
+                                item.topic,
+                                item.competency,
+                                question.status,
+                            )
+                            verification_meta = dict(question.meta.verification or {})
+                            verification_meta["graceful_fallback"] = True
+                            verification_meta["original_status"] = question.status
+                            question.meta.verification = verification_meta
+                            question.status = "OK"
+                            normalized_stem = _normalize_stem(question.stem or "")
+                            _reattach_evidence_from_cache(question, shared_retrieval_cache)
                         else:
                             LOGGER.error(
                                 "generation_failed: OK-only attempts exhausted for topic=%s competency=%s",
@@ -1366,6 +1458,22 @@ def run_pipeline_stream(
                                 "message": _GENERIC_FAILURE_MESSAGE,
                             }
                             break
+
+                    q_hash = _exact_question_hash(question)
+                    if q_hash in run_used_hashes:
+                        LOGGER.warning(
+                            "\nExact duplicate suppressed: topic=%s competency=%s stem=%s",
+                            item.topic,
+                            item.competency,
+                            _truncate_log(question.stem or ""),
+                        )
+                        question.status = "FAILED_VERIFICATION"
+                        verification_meta = dict(question.meta.verification or {})
+                        verification_meta["error"] = "duplicate_exact"
+                        verification_meta["duplicate"] = True
+                        question.meta.verification = verification_meta
+                    else:
+                        run_used_hashes.add(q_hash)
 
                     item_outputs.append(question.model_dump())
                     item_reports.append(question.meta.verification.get("gate"))

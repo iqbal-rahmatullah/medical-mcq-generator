@@ -288,10 +288,7 @@ export default function HomePage() {
                     onChange={setShowAnswers}
                   />
                   {results.length > 0 && !loading ? (
-                    <div
-                      className='export-dropdown'
-                      ref={exportRef}
-                    >
+                    <div className='export-dropdown' ref={exportRef}>
                       <button
                         id='export-btn'
                         type='button'
@@ -311,7 +308,7 @@ export default function HomePage() {
                             role='menuitem'
                             onClick={() => handleExport("json")}
                           >
-                            <span className='export-icon'>{ }</span>
+                            <span className='export-icon'>{}</span>
                             <span>
                               <strong>JSON</strong>
                               <small>Raw data</small>

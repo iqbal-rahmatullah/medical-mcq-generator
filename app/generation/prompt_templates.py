@@ -243,6 +243,11 @@ Style rules:
 - Do NOT use source attribution phrases in stems/options (e.g., "according to", "based on", "the study shows", "evidence suggests").
 - Write stems as natural exam-style questions or short clinical vignettes.
 
+CRITICAL RULES:
+- The question MUST be DIRECTLY and SPECIFICALLY about "{topic}" — do NOT create questions about other medical topics even if the evidence mentions them.
+- Each question in the batch must test a DIFFERENT clinical concept. Do not create multiple questions about the same disease, mechanism, or finding.
+- Do NOT use "All of the above", "None of the above", or "Both A and B" as answer options.
+
 {few_shot_section}
 
 Topic: {topic}
@@ -304,6 +309,12 @@ Style rules:
 - Avoid meta language such as "according to the evidence" or "based on the evidence".
 - Do NOT use source attribution phrases in stems/options (e.g., "according to", "based on", "the study shows", "evidence suggests").
 - Write stems as natural exam-style questions or short clinical vignettes.
+
+CRITICAL RULES:
+- The question MUST be DIRECTLY and SPECIFICALLY about "{topic}" — do NOT create questions about other medical topics even if the evidence mentions them.
+- Each question in the batch must test a DIFFERENT clinical concept. Do not create multiple questions about the same disease, mechanism, or finding.
+- Do NOT use "All of the above", "None of the above", or "Both A and B" as answer options.
+- For Bahasa Indonesia translations (stem_id, options_id, explanation_id): use ONLY standard Latin characters. Do NOT include Chinese, Korean, Japanese, Arabic, or any non-Latin characters.
 
 {few_shot_section}
 

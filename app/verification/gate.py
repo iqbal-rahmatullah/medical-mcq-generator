@@ -156,6 +156,15 @@ def verify_questions(
                 reviewer if run_reviewer else None,
             )
         )
+        failed_checks.extend(
+            _check_topic_relevance(
+                question,
+                notes,
+                reviewer if run_reviewer else None,
+            )
+        )
+        failed_checks.extend(_check_forbidden_option_formats(question, notes))
+        failed_checks.extend(_check_clinical_vignette(question, notes))
 
         if (
             run_reviewer
@@ -321,6 +330,42 @@ def _check_topic_coverage_llm(
     return []
 
 
+def _check_topic_relevance(
+    question: QuestionItem,
+    notes: List[str],
+    reviewer: Optional[ReviewerClient],
+) -> List[str]:
+    """Check if the generated question is actually about the requested topic using LLM."""
+    if reviewer is None:
+        return []
+    if question.status != "OK":
+        return []
+
+    try:
+        prompt = _build_topic_relevance_prompt(question.topic, question.stem)
+        text = reviewer._llm_client.generate_text(prompt)
+        if text is None:
+            return []
+        is_relevant = _parse_topic_coverage_decision(text)
+        if not is_relevant:
+            LOGGER.warning(
+                "Topic guard FAILED: topic=%s stem=%s",
+                question.topic,
+                question.stem[:100],
+            )
+            notes.append(f"topic_relevance: question is not about '{question.topic}'")
+            return ["topic_relevance"]
+        else:
+            LOGGER.info(
+                "Topic guard OK: topic=%s",
+                question.topic,
+            )
+    except Exception as exc:
+        notes.append(f"topic_relevance_error: {exc}")
+
+    return []
+
+
 def _normalize_match_text(text: str) -> str:
     return " ".join(text.strip().split()).lower()
 
@@ -335,12 +380,27 @@ def _build_review_prompt(question: QuestionItem, evidence_text: str) -> str:
         ]
     )
     return (
-        "You are verifying if the question is answerable from the evidence.\n"
+        "You are verifying whether a medical MCQ is answerable from evidence AND well-constructed.\n"
         "Reply with a single token: A, B, C, D, or INSUFFICIENT.\n"
+        "Reply INSUFFICIENT if:\n"
+        "  - The correct answer cannot be determined from the evidence\n"
+        "  - The distractors (wrong options) are implausible or not medically relevant\n"
+        "  - The question tests only trivial recall rather than clinical reasoning\n"
         "Do not add extra text.\n\n"
         f"Question: {question.stem}\n"
         f"Options:\n{options}\n\n"
         f"Evidence:\n{evidence_text}\n"
+    )
+
+
+def _build_topic_relevance_prompt(topic: str, stem: str) -> str:
+    return (
+        "You are checking whether a medical exam question is DIRECTLY about the given topic.\n"
+        "The question must specifically test knowledge of the topic, not merely mention it.\n"
+        "Reply with a single token: YES or NO.\n"
+        "Do not add extra text.\n\n"
+        f"Topic: {topic}\n\n"
+        f"Question: {stem}\n"
     )
 
 
@@ -371,3 +431,247 @@ def _parse_topic_coverage_decision(text: str) -> bool:
     if "NO" in normalized:
         return False
     return False
+
+
+_DEFINITIONAL_PATTERNS = [
+    re.compile(r"^apa\s+(yang\s+)?(?:dimaksud|definisi|pengertian)", re.I),
+    re.compile(r"^apa\s+(?:itu|adalah)\b", re.I),
+    re.compile(r"bidang studi mana", re.I),
+    re.compile(r"^definisi\s+", re.I),
+    re.compile(r"^what\s+is\s+(?:the\s+)?(?:definition|meaning)\s+of\b", re.I),
+    re.compile(r"^define\s+\w+", re.I),
+    re.compile(r"^which\s+field\s+of\s+(?:study|medicine)", re.I),
+    re.compile(r"^what\s+is\s+\w+\?\s*$", re.I),
+    re.compile(r"^which\s+of\s+the\s+following\s+(?:bacteria|virus|organism|pathogen|drug|medication|antibiotic|enzyme|gene|chromosome)\b", re.I),
+    re.compile(r"^what\s+is\s+the\s+(?:most\s+common\s+)?(?:cause|etiology|pathogen|agent)\s+of\b", re.I),
+    re.compile(r"^what\s+is\s+the\s+(?:primary|recommended|preferred|main|standard)\s+(?:method|treatment|therapy|approach|benefit|goal|purpose)\s+(?:of|for)\b", re.I),
+    re.compile(r"^what\s+is\s+the\s+(?:primary|recommended|preferred|current)\s+(?:understanding|concept|mechanism)\b", re.I),
+    re.compile(r"^what\s+is\s+the\s+recommended\s+concentration\b", re.I),
+    re.compile(r"^which\s+(?:mosquito|vector|organism|bacteria|virus)\s+(?:species|type)\s+is\b", re.I),
+]
+
+
+def _check_clinical_vignette(
+    question: QuestionItem,
+    notes: List[str],
+) -> List[str]:
+    """Block definitional/trivial stems that are not clinical vignettes."""
+    if question.status != "OK":
+        return []
+    stem = question.stem.strip()
+    for pattern in _DEFINITIONAL_PATTERNS:
+        if pattern.search(stem):
+            LOGGER.warning(
+                "Clinical vignette gate FAILED: stem is definitional. topic=%s stem=%s",
+                question.topic,
+                stem[:120],
+            )
+            notes.append("clinical_vignette: stem is definitional, not a clinical question")
+            return ["not_clinical_vignette"]
+    return []
+
+
+_FORBIDDEN_OPTION_PATTERNS = [
+    re.compile(r"\ball\s+of\s+the\s+above\b", re.I),
+    re.compile(r"\bnone\s+of\s+the\s+above\b", re.I),
+    re.compile(r"\bboth\s+[a-d]\s+and\s+[a-d]\b", re.I),
+    re.compile(r"\bsemua\s+(?:di\s+atas|jawaban\s+benar)\b", re.I),
+    re.compile(r"\btidak\s+ada\s+(?:yang\s+benar|di\s+atas)\b", re.I),
+]
+
+
+def _check_forbidden_option_formats(
+    question: QuestionItem,
+    notes: List[str],
+) -> List[str]:
+    """Reject options like 'All of the above' or 'None of the above' — banned in standard MCQs."""
+    if question.status != "OK":
+        return []
+    opts = [
+        question.options.A or "",
+        question.options.B or "",
+        question.options.C or "",
+        question.options.D or "",
+    ]
+    for opt_text in opts:
+        for pattern in _FORBIDDEN_OPTION_PATTERNS:
+            if pattern.search(opt_text):
+                LOGGER.warning(
+                    "Forbidden option format: topic=%s option=%s",
+                    question.topic, opt_text[:80],
+                )
+                notes.append(f"forbidden_option: '{opt_text}'")
+                return ["forbidden_option_format"]
+    return []
+
+
+_COMPETENCY_ANSWER_GUIDANCE = {
+    "diagnosis": (
+        "a diagnostic test, imaging modality, sign/symptom interpretation, "
+        "scoring tool, or diagnostic criterion — NOT a treatment or drug"
+    ),
+    "treatment": (
+        "a drug, procedure, therapeutic intervention, or management step — "
+        "NOT a diagnostic test or pathophysiology explanation"
+    ),
+    "etiology": (
+        "a cause, risk factor, pathogen, organism, or predisposing condition — "
+        "NOT a treatment or purely diagnostic step"
+    ),
+    "pathology": (
+        "a histological finding, pathological mechanism, cellular change, or "
+        "morphological feature — NOT a drug or screening test"
+    ),
+    "basic sciences": (
+        "a physiological mechanism, biochemical process, anatomical structure, "
+        "or basic science concept — NOT a clinical management decision"
+    ),
+    "clinical practice": None,  # flexible, skip check
+}
+
+
+def _check_competency_alignment(
+    question: QuestionItem,
+    notes: List[str],
+    reviewer: Optional[ReviewerClient],
+) -> List[str]:
+    """LLM gate: verify the correct answer type is consistent with the stated competency."""
+    if reviewer is None:
+        return []
+    if question.status != "OK":
+        return []
+
+    competency_key = (question.competency or "").strip().lower()
+    guidance = _COMPETENCY_ANSWER_GUIDANCE.get(competency_key)
+    if guidance is None:
+        return []  # clinical_practice is flexible — skip
+
+    answer_letter = question.answer_key or "A"
+    answer_text = getattr(question.options, answer_letter, "") or ""
+
+    try:
+        prompt = (
+            f"You are checking whether a medical MCQ answer is appropriate for its competency.\n"
+            f"Competency: {question.competency}\n"
+            f"For this competency, the correct answer should be: {guidance}\n\n"
+            f"Correct answer ({answer_letter}): {answer_text}\n\n"
+            f"Is the correct answer consistent with the competency? Reply YES or NO only."
+        )
+        text = reviewer._llm_client.generate_text(prompt)
+        if text is None:
+            return []
+        aligned = _parse_topic_coverage_decision(text)
+        if not aligned:
+            LOGGER.warning(
+                "Competency alignment FAILED: topic=%s competency=%s answer=%s",
+                question.topic, question.competency, answer_letter,
+            )
+            notes.append(
+                f"competency_mismatch: answer '{answer_text}' does not match "
+                f"competency '{question.competency}'"
+            )
+            return ["competency_mismatch"]
+        else:
+            LOGGER.debug(
+                "Competency alignment OK: topic=%s competency=%s",
+                question.topic, question.competency,
+            )
+    except Exception as exc:
+        notes.append(f"competency_alignment_error: {exc}")
+
+    return []
+
+def _check_evidence_supports_answer(
+    question: QuestionItem,
+    doc_lookup: dict[str, Document],
+    notes: List[str],
+    reviewer: Optional[ReviewerClient],
+) -> List[str]:
+    """Check if the evidence EXPLICITLY supports the stated answer key."""
+    if reviewer is None:
+        return []
+    if question.status != "OK":
+        return []
+    if not question.evidence:
+        return []
+
+    evidence_docs = [
+        doc_lookup.get(e.doc_id)
+        for e in question.evidence
+        if e.doc_id in doc_lookup
+    ]
+    evidence_docs = [d for d in evidence_docs if d is not None]
+    if not evidence_docs:
+        return []
+
+    try:
+        evidence_text = render_evidence(
+            evidence_docs,
+            max_chars_per_doc=settings.EVIDENCE_MAX_CHARS_PER_DOC,
+            max_total_chars=settings.EVIDENCE_MAX_TOTAL_CHARS,
+        )
+        answer_letter = question.answer_key or "A"
+        answer_text = getattr(question.options, answer_letter, "") or ""
+        options = "\n".join([
+            f"A. {question.options.A}",
+            f"B. {question.options.B}",
+            f"C. {question.options.C}",
+            f"D. {question.options.D}",
+        ])
+        prompt = (
+            f"You are checking whether evidence EXPLICITLY supports the correct answer to a medical MCQ.\n"
+            f"Stated correct answer: ({answer_letter}) {answer_text}\n\n"
+            f"Question: {question.stem}\n"
+            f"Options:\n{options}\n\n"
+            f"Evidence:\n{evidence_text}\n\n"
+            f"Does the evidence EXPLICITLY state or strongly imply that option {answer_letter} is correct?\n"
+            f"Answer NO if the evidence only mentions the topic tangentially without supporting the specific answer.\n"
+            f"Reply YES or NO only."
+        )
+        text = reviewer._llm_client.generate_text(prompt)
+        if text is None:
+            return []
+        supported = _parse_topic_coverage_decision(text)
+        if not supported:
+            LOGGER.warning(
+                "Evidence-answer alignment FAILED: topic=%s answer=%s text=%s",
+                question.topic, answer_letter, answer_text[:60],
+            )
+            notes.append(
+                f"evidence_answer_mismatch: evidence does not explicitly support "
+                f"({answer_letter}) '{answer_text}'"
+            )
+            return ["evidence_answer_mismatch"]
+        else:
+            LOGGER.debug(
+                "Evidence-answer alignment OK: topic=%s answer=%s",
+                question.topic, answer_letter,
+            )
+    except Exception as exc:
+        notes.append(f"evidence_answer_check_error: {exc}")
+
+    return []
+
+def _check_competency_alignment_nonblocking(
+    question: "QuestionItem",
+    notes: List[str],
+    reviewer: Optional[ReviewerClient],
+) -> None:
+    """Non-blocking version: runs competency_alignment and logs result to notes only."""
+    try:
+        _check_competency_alignment(question, notes, reviewer)
+    except Exception as exc:
+        notes.append(f"competency_alignment_nb_error: {exc}")
+
+
+def _check_evidence_supports_answer_nonblocking(
+    question: "QuestionItem",
+    doc_lookup: dict,
+    notes: List[str],
+    reviewer: Optional[ReviewerClient],
+) -> None:
+    """Non-blocking version: runs evidence_supports_answer and logs result to notes only."""
+    try:
+        _check_evidence_supports_answer(question, doc_lookup, notes, reviewer)
+    except Exception as exc:
+        notes.append(f"evidence_answer_nb_error: {exc}")

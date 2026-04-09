@@ -65,18 +65,21 @@ class Settings(BaseSettings):
     # Reviewer 1 config
     REVIEWER_1_PROVIDER: str = ""
     REVIEWER_1_API_KEY: str = ""
+    REVIEWER_1_API_BASE: str = ""
     REVIEWER_1_MODEL: str = ""
     REVIEWER_1_FALLBACKS: str = ""
     
     # Reviewer 2 config
     REVIEWER_2_PROVIDER: str = ""
     REVIEWER_2_API_KEY: str = ""
+    REVIEWER_2_API_BASE: str = ""
     REVIEWER_2_MODEL: str = ""
     REVIEWER_2_FALLBACKS: str = ""
     
     # Reviewer 3 config
     REVIEWER_3_PROVIDER: str = ""
     REVIEWER_3_API_KEY: str = ""
+    REVIEWER_3_API_BASE: str = ""
     REVIEWER_3_MODEL: str = ""
     REVIEWER_3_FALLBACKS: str = ""
     CORPUS_PUBMED_HF_DATASET: str = "MedRAG/pubmed"
