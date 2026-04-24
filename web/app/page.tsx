@@ -11,8 +11,12 @@ import ToggleSwitch from "../components/ToggleSwitch"
 import { useQuestionGenerator } from "./hooks/useQuestionGenerator"
 import { COMPETENCY_OPTIONS } from "./lib/constants"
 import { exportDOCX, exportJSON, exportPDF } from "./lib/export"
-import type { Options } from "./lib/generate"
 import { buildGeneratePayload } from "./lib/generate"
+import {
+  hasIndonesianTranslationCoverage,
+  QUESTION_OPTION_KEYS,
+  resolveQuestionForDisplay,
+} from "./lib/question-display"
 import type { TopicEntry } from "./lib/types"
 
 export default function HomePage() {
@@ -32,20 +36,27 @@ export default function HomePage() {
   const exportRef = useRef<HTMLDivElement>(null)
 
   const questionCards = useMemo(() => {
-    return results.map((question, index) => {
-      const useIndonesian = displayLanguage === "id"
-      const stem =
-        useIndonesian && question.stem_id ? question.stem_id : question.stem
-      const rawOptions = question.options
-      const rawOptionsId = question.options_id
-      const resolvedOptions: Options =
-        useIndonesian && rawOptionsId ? rawOptionsId : rawOptions
-      const explanation =
-        useIndonesian && question.explanation_id
-          ? question.explanation_id
-          : question.explanation
+    const rankedQuestions = results
+      .map((question, sourceIndex) => ({
+        question,
+        sourceIndex,
+        isCovered:
+          displayLanguage !== "id" || hasIndonesianTranslationCoverage(question),
+      }))
+      .sort((left, right) => {
+        if (left.isCovered === right.isCovered) {
+          return left.sourceIndex - right.sourceIndex
+        }
+        return left.isCovered ? -1 : 1
+      })
 
-      const evidenceItems = (question.evidence || [])
+    return rankedQuestions.map(({ question, sourceIndex }, index) => {
+      const resolvedQuestion = resolveQuestionForDisplay(
+        question,
+        displayLanguage,
+      )
+
+      const evidenceItems = resolvedQuestion.evidence
         .map((item) => {
           const docId = item.doc_id || ""
           const source = item.source || ""
@@ -59,25 +70,24 @@ export default function HomePage() {
         .filter((item) => item.docId || item.span)
 
       return {
+        sourceIndex,
         index: index + 1,
-        prompt: stem || "Question text unavailable.",
-        topic: question.topic || "",
-        competency: question.competency || "",
-        options: [
-          { key: "A" as const, text: resolvedOptions.A || "-" },
-          { key: "B" as const, text: resolvedOptions.B || "-" },
-          { key: "C" as const, text: resolvedOptions.C || "-" },
-          { key: "D" as const, text: resolvedOptions.D || "-" },
-        ],
-        selectedKey: showAnswers ? question.answer_key : undefined,
-        explanation: explanation || "",
+        prompt: resolvedQuestion.stem || "Question text unavailable.",
+        topic: resolvedQuestion.topic,
+        competency: resolvedQuestion.competency,
+        options: QUESTION_OPTION_KEYS.map((key) => ({
+          key,
+          text: resolvedQuestion.options[key] || "-",
+        })),
+        selectedKey: showAnswers ? resolvedQuestion.answer_key : undefined,
+        explanation: resolvedQuestion.explanation || "",
         evidence: evidenceItems.length
           ? {
               label: "Source Evidence / RAG Context",
               items: evidenceItems,
             }
           : undefined,
-        status: question.status,
+        status: resolvedQuestion.status,
       }
     })
   }, [results, showAnswers, displayLanguage])
@@ -351,7 +361,7 @@ export default function HomePage() {
                 <div className='question-list'>
                   {questionCards.map((question) => (
                     <QuestionCard
-                      key={question.prompt.slice(0, 24)}
+                      key={`question-${question.sourceIndex}`}
                       index={question.index}
                       topic={question.topic}
                       competency={question.competency}

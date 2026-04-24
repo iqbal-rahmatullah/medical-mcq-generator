@@ -9,7 +9,7 @@ import type {
   ProgressState,
   WsEvent,
 } from '../lib/generate'
-import { WS_BASE } from '../lib/config'
+import { getWsUrl } from '../lib/config'
 import { appendHistory, createHistoryEntry } from '../lib/history'
 
 export const useQuestionGenerator = (): GeneratorState & {
@@ -82,7 +82,7 @@ export const useQuestionGenerator = (): GeneratorState & {
     setProgress({ completed: 0, total: totalQuestions })
     historyRef.current = { entry: createHistoryEntry(payload), stored: false }
 
-    const socket = new WebSocket(`${WS_BASE}/ws/generate`)
+    const socket = new WebSocket(getWsUrl('/ws/generate'))
     socketRef.current = socket
 
     socket.onopen = () => {

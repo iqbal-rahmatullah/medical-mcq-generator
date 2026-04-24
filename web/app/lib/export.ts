@@ -1,21 +1,9 @@
 import type { ApiQuestion } from "./generate"
-
-type DisplayLanguage = "en" | "id"
-
-function resolveQuestion(q: ApiQuestion, lang: DisplayLanguage) {
-  const useId = lang === "id"
-  return {
-    stem: (useId && q.stem_id ? q.stem_id : q.stem) || "",
-    options: (useId && q.options_id ? q.options_id : q.options) || q.options,
-    explanation:
-      (useId && q.explanation_id ? q.explanation_id : q.explanation) || "",
-    topic: q.topic || "",
-    competency: q.competency || "",
-    answer_key: q.answer_key,
-    evidence: q.evidence || [],
-    status: q.status,
-  }
-}
+import {
+  QUESTION_OPTION_KEYS,
+  type DisplayLanguage,
+  resolveQuestionForDisplay,
+} from "./question-display"
 
 function todayStr() {
   return new Date().toISOString().split("T")[0]
@@ -32,7 +20,7 @@ function triggerDownload(blob: Blob, filename: string) {
 
 export function exportJSON(questions: ApiQuestion[], lang: DisplayLanguage) {
   const exported = questions.map((q, i) => {
-    const r = resolveQuestion(q, lang)
+    const r = resolveQuestionForDisplay(q, lang)
     return {
       number: i + 1,
       topic: r.topic,
@@ -128,7 +116,7 @@ export async function exportPDF(
 
   // Questions
   questions.forEach((q, i) => {
-    const r = resolveQuestion(q, lang)
+    const r = resolveQuestionForDisplay(q, lang)
     const num = i + 1
 
     checkPage(30)
@@ -151,8 +139,7 @@ export async function exportPDF(
     y += 2
 
     // Options
-    const optKeys = ["A", "B", "C", "D"] as const
-    optKeys.forEach((key) => {
+    QUESTION_OPTION_KEYS.forEach((key) => {
       const text = r.options[key]
       const isAnswer = key === r.answer_key
       doc.setFontSize(10)
@@ -248,9 +235,8 @@ export async function exportDOCX(
   )
 
   questions.forEach((q, i) => {
-    const r = resolveQuestion(q, lang)
+    const r = resolveQuestionForDisplay(q, lang)
     const num = i + 1
-    const optKeys = ["A", "B", "C", "D"] as const
 
     // Question heading
     children.push(
@@ -285,7 +271,7 @@ export async function exportDOCX(
     )
 
     // Options
-    optKeys.forEach((key) => {
+    QUESTION_OPTION_KEYS.forEach((key) => {
       const isAnswer = key === r.answer_key
       children.push(
         new Paragraph({

@@ -24,12 +24,12 @@ export type ApiQuestion = {
   stem: string
   options: Options
   answer_key: AnswerKey
-  explanation?: string
+  explanation?: string | null
   evidence?: EvidenceItem[]
   status?: QuestionStatus
-  stem_id?: string
-  options_id?: Options
-  explanation_id?: string
+  stem_id?: string | null
+  options_id?: Partial<Options> | null
+  explanation_id?: string | null
 }
 
 export type ProgressState = {
