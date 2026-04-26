@@ -1,0 +1,490 @@
+{
+  "exported_at": "2026-04-09T00:45:48.870Z",
+  "language": "en",
+  "total_questions": 23,
+  "questions": [
+    {
+      "number": 1,
+      "topic": "Sepsis",
+      "competency": "Diagnosis",
+      "stem": "A newborn is suspected of having sepsis. Which of the following statements about the diagnosis of neonatal sepsis is accurate?",
+      "options": {
+        "A": "Blood culture is a definitive diagnostic test for neonatal sepsis.",
+        "B": "There is a single, reliable laboratory test for diagnosing neonatal sepsis.",
+        "C": "Historical, clinical, and laboratory data must be used together to diagnose neonatal sepsis.",
+        "D": "Neonatal sepsis can be ruled out with a negative blood culture."
+      },
+      "answer_key": "C",
+      "explanation": "Accurate diagnosis of neonatal sepsis is difficult due to the lack of a definitive diagnostic test. Blood cultures have low sensitivity, and no single laboratory test is reliable. Therefore, a combination of historical, clinical, and laboratory data is necessary for optimal diagnosis and treatment.",
+      "evidence": [
+        {
+          "doc_id": "pubmed23n0062_17702",
+          "source": "pubmed",
+          "span_text": "Accurate diagnosis is difficult because there is no definitive diagnostic test; even blood cultures have an unacceptably low sensitivity. Therefore, the clinician must accept that a number of neonates will have treatment initiated for sepsis who do not have the disease. In order to treat rapidly all infants with sepsis and to minimize therapy for those without infection, historical, clinical, and laboratory data can be used together in a management approach to achieve optimal results."
+        }
+      ]
+    },
+    {
+      "number": 2,
+      "topic": "Sepsis",
+      "competency": "Diagnosis",
+      "stem": "A 45-year-old woman presents with fever, abdominal pain, and tenderness after a cesarean delivery. Imaging studies are non-specific. Which of the following is an uncommon but important cause of postoperative intra-abdominal sepsis in this context?",
+      "options": {
+        "A": "Appendicitis",
+        "B": "Vernix caseosa peritonitis",
+        "C": "Intra-abdominal abscess",
+        "D": "Surgical site infection"
+      },
+      "answer_key": "B",
+      "explanation": "Vernix caseosa peritonitis is an uncommon but important cause of postoperative intra-abdominal sepsis following cesarean delivery, resulting from a sustained foreign body inflammatory reaction to fetal vernix introduced into the maternal peritoneal cavity.",
+      "evidence": [
+        {
+          "doc_id": "pubmed_web_41948239",
+          "source": "pubmed_web",
+          "span_text": "Vernix caseosa peritonitis is an uncommon but important cause of postoperative intra-abdominal sepsis following cesarean delivery, resulting from a sustained foreign body inflammatory reaction to fetal vernix introduced into the maternal peritoneal cavity, typically manifesting within hours to days after surgery and often mimicking other acute surgical abdominal conditions with non-specific or misleading radiological findings."
+        }
+      ]
+    },
+    {
+      "number": 3,
+      "topic": "Sepsis",
+      "competency": "Diagnosis",
+      "stem": "What is the primary method for diagnosing acute sepsis after musculoskeletal surgery?",
+      "options": {
+        "A": "Clinical examination",
+        "B": "Laboratory evaluation",
+        "C": "Roentgenographic examination",
+        "D": "Nuclear scans"
+      },
+      "answer_key": "A",
+      "explanation": "The diagnosis of acute sepsis after musculoskeletal surgery is based on the results of the clinical examination.",
+      "evidence": [
+        {
+          "doc_id": "pubmed23n0015_9330",
+          "source": "pubmed",
+          "span_text": "The diagnosis of acute sepsis after musculoskeletal surgery is based on the results of the clinical examination."
+        }
+      ]
+    },
+    {
+      "number": 4,
+      "topic": "Malaria",
+      "competency": "Basic Sciences",
+      "stem": "What is the recommended concentration of DEET in insect repellents for preventing malaria in regions where the disease is transmitted?",
+      "options": {
+        "A": "10-20%",
+        "B": "25-50%",
+        "C": "50-75%",
+        "D": "75-90%"
+      },
+      "answer_key": "B",
+      "explanation": "According to InternalMed_Harrison, DEET products (25–50%) are recommended, even for children and infants at birth, for preventing malaria. Studies suggest that concentrations of DEET above ~50% do not offer a marked increase in protection time against mosquitoes.",
+      "evidence": [
+        {
+          "doc_id": "InternalMed_Harrison_9883",
+          "source": "textbook",
+          "span_text": "DEET products (25–50%) are recommended, even for children and infants at birth. Studies suggest that concentrations of DEET above ~50% do not offer a marked increase in protection time against mosquitoes."
+        }
+      ]
+    },
+    {
+      "number": 5,
+      "topic": "Malaria",
+      "competency": "Basic Sciences",
+      "stem": "Which of the following is a consequence of malaria infection on reproductive health in males?",
+      "options": {
+        "A": "Increased semen quality",
+        "B": "Oligozoospermia",
+        "C": "Improved fertility",
+        "D": "No impact on reproductive health"
+      },
+      "answer_key": "B",
+      "explanation": "Malaria is associated with decreased semen quality, oligozoospermia, necrozoospermia/azoospermia. This suggests that malaria infection can have a negative impact on male reproductive health.",
+      "evidence": [
+        {
+          "doc_id": "pubmed_web_41773377",
+          "source": "pubmed_web",
+          "span_text": "Malaria is associated with decreased semen quality, oligozoospermia, necrozoo-spermia/azoospermia. Antimalarial-drugs have adverse-effects on re¬productive functions."
+        }
+      ]
+    },
+    {
+      "number": 6,
+      "topic": "Malaria",
+      "competency": "Basic Sciences",
+      "stem": "Which of the following mosquito species is the primary vector of malaria in Africa?",
+      "options": {
+        "A": "Anopheles gambiae",
+        "B": "Aedes aegypti",
+        "C": "Culex pipiens",
+        "D": "Anopheles dirus"
+      },
+      "answer_key": "A",
+      "explanation": "Anopheles gambiae is widely recognized as the primary vector of malaria in Africa due to its high efficiency in transmitting Plasmodium parasites.",
+      "evidence": [
+        {
+          "doc_id": "pubmed_web_41843798",
+          "source": "pubmed_web",
+          "span_text": "The family Culicidae is a medically significant group of insects. As major vectors of deadly diseases such as malaria, dengue, and Zika, mosquitoes cause hundreds of thousands of deaths globally each year."
+        }
+      ]
+    },
+    {
+      "number": 7,
+      "topic": "Heart Failure",
+      "competency": "Clinical Practice",
+      "stem": "A 65-year-old patient with a history of hypertension and coronary artery disease presents with shortness of breath and fatigue. Physical examination reveals elevated jugular venous pressure and bilateral pitting edema. Which of the following is the most likely diagnosis?",
+      "options": {
+        "A": "Right-sided heart failure",
+        "B": "Left-sided heart failure",
+        "C": "Biventricular heart failure",
+        "D": "Pulmonary embolism"
+      },
+      "answer_key": "C",
+      "explanation": "The patient's symptoms of shortness of breath and fatigue, along with physical examination findings of elevated jugular venous pressure and bilateral pitting edema, suggest fluid overload and cardiac dysfunction. Biventricular heart failure is the most likely diagnosis, as it involves both the left and right ventricles and can present with symptoms of both left-sided and right-sided heart failure.",
+      "evidence": [
+        {
+          "doc_id": "InternalMed_Harrison_18170",
+          "source": "textbook",
+          "span_text": "Heart failure is a complex clinical syndrome that results from structural or functional impairment of ventricular filling or ejection of blood, which in turn leads to the cardinal clinical symptoms of dyspnea and fatigue and signs of HF, namely edema and rales."
+        }
+      ]
+    },
+    {
+      "number": 8,
+      "topic": "Heart Failure",
+      "competency": "Clinical Practice",
+      "stem": "A 65-year-old man with a history of coronary artery disease presents with sudden onset of shortness of breath and orthopnea. Physical examination reveals bilateral pitting edema and elevated jugular venous pressure. Which of the following is the most likely diagnosis?",
+      "options": {
+        "A": "Acute coronary syndrome",
+        "B": "Chronic obstructive pulmonary disease",
+        "C": "Pulmonary embolism",
+        "D": "Acute decompensated heart failure"
+      },
+      "answer_key": "D",
+      "explanation": "The patient's symptoms of sudden onset shortness of breath, orthopnea, bilateral pitting edema, and elevated jugular venous pressure are classic signs of acute decompensated heart failure. The history of coronary artery disease also increases the risk for heart failure.",
+      "evidence": [
+        {
+          "doc_id": "InternalMed_Harrison_18170",
+          "source": "textbook",
+          "span_text": "The cardinal clinical symptoms of dyspnea and fatigue and signs of HF, namely edema and rales, are used to define heart failure."
+        }
+      ]
+    },
+    {
+      "number": 9,
+      "topic": "Heart Failure",
+      "competency": "Clinical Practice",
+      "stem": "A 70-year-old patient with a history of coronary artery disease presents with symptoms of fatigue, shortness of breath, and swelling in the legs. Physical examination reveals elevated jugular venous pressure and S3 heart sound. Which of the following is the most likely diagnosis?",
+      "options": {
+        "A": "Right-sided heart failure",
+        "B": "Left-sided heart failure",
+        "C": "Biventricular heart failure",
+        "D": "Cardiac tamponade"
+      },
+      "answer_key": "C",
+      "explanation": "The patient's symptoms of fatigue, shortness of breath, and swelling in the legs, along with physical examination findings of elevated jugular venous pressure and S3 heart sound, are consistent with biventricular heart failure. This condition occurs when both ventricles are unable to pump efficiently, leading to fluid buildup in both the lungs and peripheral tissues.",
+      "evidence": [
+        {
+          "doc_id": "InternalMed_Harrison_17339",
+          "source": "textbook",
+          "span_text": "Several techniques can define impaired cardiac function in clinical practice. The cardiac output and stroke volume may be depressed in the presence of heart failure, but not uncommonly, these variables are within normal limits in this condition."
+        }
+      ]
+    },
+    {
+      "number": 10,
+      "topic": "Heart Failure",
+      "competency": "Clinical Practice",
+      "stem": "A patient with heart failure is classified according to which system by the American Heart Association/American College of Cardiology (AHA/ACC) guidelines?",
+      "options": {
+        "A": "Functional severity",
+        "B": "Left-sided vs. right-sided failure",
+        "C": "Clinical syndromes",
+        "D": "Systolic vs. diastolic failure"
+      },
+      "answer_key": "C",
+      "explanation": "The AHA/ACC guidelines classify heart failure according to clinical syndromes. This classification system is mentioned in the provided evidence.",
+      "evidence": [
+        {
+          "doc_id": "First_Aid_Step2_12",
+          "source": "textbook",
+          "span_text": "The American Heart Association/American College of Cardiology (AHA/ACC) guidelines classify heart failure according to clinical syndromes, but alternative classification systems include functional severity, left-sided vs. right-sided failure, and systolic vs. diastolic failure (see Tables 2.1-4 through 2.1-7)."
+        }
+      ]
+    },
+    {
+      "number": 11,
+      "topic": "Peptic Ulcer Disease",
+      "competency": "Etiology",
+      "stem": "A 45-year-old man is diagnosed with peptic ulcer disease. Which of the following bacteria is most commonly associated with this condition?",
+      "options": {
+        "A": "Helicobacter pylori",
+        "B": "Escherichia coli",
+        "C": "Streptococcus pneumoniae",
+        "D": "Salmonella enteritidis"
+      },
+      "answer_key": "A",
+      "explanation": "Helicobacter pylori infection is a major cause of peptic ulcer disease. The bacteria's urease activity and motility are important virulence factors in the development of gastritis and peptic ulcers.",
+      "evidence": [
+        {
+          "doc_id": "pubmed23n0052_19614",
+          "source": "pubmed",
+          "span_text": "Helicobacter pylori infection is now recognized as the primary cause of active chronic gastritis in humans. Most infected persons remain asymptomatic, but are at increased risk for the development of peptic ulcer disease and possibly gastric cancer."
+        }
+      ]
+    },
+    {
+      "number": 12,
+      "topic": "Peptic Ulcer Disease",
+      "competency": "Etiology",
+      "stem": "A 40-year-old man with a family history of peptic ulcers is more likely to develop the disease if he is exposed to which of the following environmental stimuli?",
+      "options": {
+        "A": "Chronic stress",
+        "B": "Frequent infections",
+        "C": "Poor nutrition",
+        "D": "Day care attendance"
+      },
+      "answer_key": "A",
+      "explanation": "Family history and environmental stimuli such as stress can contribute to the development of peptic ulcers. Stress can induce peptic ulcer disease in individuals with genetic susceptibility.",
+      "evidence": [
+        {
+          "doc_id": "pubmed23n0028_7849",
+          "source": "pubmed",
+          "span_text": "It is suggested that, depending on the genetic susceptibility, similar environmental stimuli like preexisting \"stress\" could induce either ischaemic heart disease or peptic ulcer."
+        }
+      ]
+    },
+    {
+      "number": 13,
+      "topic": "Peptic Ulcer Disease",
+      "competency": "Etiology",
+      "stem": "What is the current understanding of the pathogenesis of peptic ulcer disease, considering the balance between protective and aggressive factors?",
+      "options": {
+        "A": "Excess acid production is the single cause of ulcer disease",
+        "B": "Disturbance of a complex balance of ulcerogenic and protective factors",
+        "C": "Genetic predisposition is the primary cause of peptic ulcer disease",
+        "D": "Infection is the sole cause of peptic ulcer disease"
+      },
+      "answer_key": "B",
+      "explanation": "The pathogenesis of peptic ulcer disease is viewed as the disturbance of a complex balance of ulcerogenic and protective factors, rather than excess acid production being the single cause.",
+      "evidence": [
+        {
+          "doc_id": "pubmed23n0051_12056",
+          "source": "pubmed",
+          "span_text": "No longer is excess acid production seen as the single cause of ulcer disease; rather, its pathogenesis is viewed as the disturbance of a complex balance of ulcerogenic and protective factors."
+        }
+      ]
+    },
+    {
+      "number": 14,
+      "topic": "Peptic Ulcer Disease",
+      "competency": "Etiology",
+      "stem": "Which of the following factors is identified as a risk factor for hospitalization due to gastrointestinal problems in patients receiving NSAIDs?",
+      "options": {
+        "A": "Young age",
+        "B": "Previous gastrointestinal symptoms",
+        "C": "High socioeconomic status",
+        "D": "Male gender"
+      },
+      "answer_key": "B",
+      "explanation": "Previous gastrointestinal symptoms are a known risk factor for hospitalization due to gastrointestinal problems in patients receiving NSAIDs, as they may indicate a pre-existing vulnerability to NSAID-related gastrointestinal complications.",
+      "evidence": [
+        {
+          "doc_id": "pubmed23n0045_15009",
+          "source": "pubmed",
+          "span_text": "Risk factors identified with hospitalisation for gastrointestinal problems in patients receiving NSAIDs include age, previous gastrointestinal symptoms, corticosteroid use and disability."
+        }
+      ]
+    },
+    {
+      "number": 15,
+      "topic": "Peptic ulcer disease",
+      "competency": "Etiology",
+      "stem": "What is a primary cause of active chronic gastritis in humans, which can lead to peptic ulcer disease?",
+      "options": {
+        "A": "Helicobacter pylori infection",
+        "B": "Genetic predisposition",
+        "C": "Environmental factors",
+        "D": "Autoimmune disease"
+      },
+      "answer_key": "A",
+      "explanation": "Helicobacter pylori infection is recognized as the primary cause of active chronic gastritis in humans, and most infected persons are at increased risk for the development of peptic ulcer disease.",
+      "evidence": [
+        {
+          "doc_id": "pubmed23n0052_19614",
+          "source": "pubmed",
+          "span_text": "Helicobacter pylori infection is now recognized as the primary cause of active chronic gastritis in humans. Most infected persons remain asymptomatic, but are at increased risk for the development of peptic ulcer disease and possibly gastric cancer."
+        }
+      ]
+    },
+    {
+      "number": 16,
+      "topic": "COPD",
+      "competency": "Treatment",
+      "stem": "A 60-year-old patient with COPD is being considered for smoking cessation therapy. What is the preferred pharmacologic method for smoking cessation in this patient?",
+      "options": {
+        "A": "Nicotine administration via a transdermal system",
+        "B": "Beta agonists",
+        "C": "Mucolytics",
+        "D": "Theophylline"
+      },
+      "answer_key": "A",
+      "explanation": "Nicotine administration via a transdermal system or polacrilex is the pharmacologic method of choice for smoking cessation in patients with COPD.",
+      "evidence": [
+        {
+          "doc_id": "pubmed23n0048_9447",
+          "source": "pubmed",
+          "span_text": "Nicotine administration via a transdermal system or polacrilex is the pharmacologic method of choice for smoking cessation."
+        }
+      ]
+    },
+    {
+      "number": 17,
+      "topic": "COPD",
+      "competency": "Treatment",
+      "stem": "A patient with COPD and hypoxemia is being considered for complementary therapy to non-invasive ventilation. Which of the following therapies may be beneficial in improving lung function and reducing inflammatory response?",
+      "options": {
+        "A": "Fire dragon jar moxibustion",
+        "B": "Influenza vaccine",
+        "C": "Anti-inflammatory diet",
+        "D": "Smoking cessation therapy"
+      },
+      "answer_key": "A",
+      "explanation": "Fire dragon jar moxibustion, a Traditional Chinese Medicine therapy, has been shown to have synergistic effects with non-invasive ventilation in improving lung function and reducing inflammatory response in COPD patients with hypoxemia.",
+      "evidence": [
+        {
+          "doc_id": "pubmed_web_41940038",
+          "source": "pubmed_web",
+          "span_text": "Fire dragon jar moxibustion, a Traditional Chinese Medicine(TCM) therapy, may complement non-invasive ventilation (NIV)...."
+        }
+      ]
+    },
+    {
+      "number": 18,
+      "topic": "COPD",
+      "competency": "Treatment",
+      "stem": "What is the primary benefit of non-invasive ventilation in patients with hypercapnic acute respiratory failure due to COPD?",
+      "options": {
+        "A": "Reduced need for intubation",
+        "B": "Improved lung function",
+        "C": "Increased oxygen saturation",
+        "D": "Enhanced patient mobility"
+      },
+      "answer_key": "A",
+      "explanation": "Non-invasive ventilation is beneficial in hypercapnic acute respiratory failure for enhancing alveolar ventilation and reducing the need for intubation, which can lead to better patient outcomes and reduced morbidity.",
+      "evidence": [
+        {
+          "doc_id": "pubmed_web_41949934",
+          "source": "pubmed_web",
+          "span_text": "Non-invasive ventilation (NIV) is beneficial in hypercapnic acute respiratory Failure (ARF) for enhancing alveolar ventilation and reducing the need for intubation."
+        }
+      ]
+    },
+    {
+      "number": 19,
+      "topic": "COPD",
+      "competency": "Treatment",
+      "stem": "A patient with severe COPD is hospitalized for an acute exacerbation. Which therapy has been shown to enhance alveolar ventilation and reduce the need for intubation in hypercapnic acute respiratory failure?",
+      "options": {
+        "A": "Invasive mechanical ventilation",
+        "B": "Non-invasive ventilation",
+        "C": "High-flow nasal oxygen therapy",
+        "D": "Pulmonary rehabilitation"
+      },
+      "answer_key": "B",
+      "explanation": "Non-invasive ventilation is beneficial in hypercapnic acute respiratory failure for enhancing alveolar ventilation and reducing the need for intubation.",
+      "evidence": [
+        {
+          "doc_id": "pubmed_web_41949934",
+          "source": "pubmed_web",
+          "span_text": "Non-invasive ventilation (NIV) is beneficial in hypercapnic acute respiratory Failure (ARF) for enhancing alveolar ventilation and reducing the need for intubation."
+        }
+      ]
+    },
+    {
+      "number": 20,
+      "topic": "COPD",
+      "competency": "Treatment",
+      "stem": "What is the primary goal of pulmonary rehabilitation in patients with chronic obstructive pulmonary disease?",
+      "options": {
+        "A": "To reduce symptoms and improve quality of life",
+        "B": "To slow disease progression and improve lung function",
+        "C": "To reduce hospital readmissions and improve survival",
+        "D": "To improve exercise tolerance and reduce disability"
+      },
+      "answer_key": "A",
+      "explanation": "Pulmonary rehabilitation is a comprehensive intervention that aims to reduce symptoms, improve quality of life, and enhance physical and emotional well-being in patients with chronic obstructive pulmonary disease.",
+      "evidence": [
+        {
+          "doc_id": "pubmed_web_41939922",
+          "source": "pubmed_web",
+          "span_text": "We focused on global trends and key research topics in COPD self-management."
+        }
+      ]
+    },
+    {
+      "number": 21,
+      "topic": "Nephrotic Syndrome",
+      "competency": "Pathology",
+      "stem": "What is the most frequent cause of the nephrotic syndrome in children, characterized by glomeruli that have a normal appearance by light microscopy?",
+      "options": {
+        "A": "Focal segmental glomerulosclerosis",
+        "B": "Minimal-change disease",
+        "C": "Membranous nephropathy",
+        "D": "IgA nephropathy"
+      },
+      "answer_key": "B",
+      "explanation": "Minimal-change disease is the most frequent cause of the nephrotic syndrome in children and is characterized by glomeruli that have a normal appearance by light microscopy.",
+      "evidence": [
+        {
+          "doc_id": "Pathology_Robbins_3365",
+          "source": "textbook",
+          "span_text": "Minimal-change disease, a relatively benign disorder, is the most frequent cause of the nephrotic syndrome in children and is characterized by glomeruli that have a normal appearance by light microscopy."
+        }
+      ]
+    },
+    {
+      "number": 22,
+      "topic": "Nephrotic Syndrome",
+      "competency": "Pathology",
+      "stem": "A child presents with abrupt development of nephrotic syndrome, characterized by selective proteinuria with preserved renal function. What is the most likely underlying glomerular lesion?",
+      "options": {
+        "A": "Focal segmental glomerulosclerosis",
+        "B": "Membranous nephropathy",
+        "C": "Minimal-change disease",
+        "D": "IgA nephropathy"
+      },
+      "answer_key": "C",
+      "explanation": "The disease typically manifests with abrupt development of the nephrotic syndrome in an otherwise healthy child, with selective proteinuria and preserved renal function, which is characteristic of minimal-change disease.",
+      "evidence": [
+        {
+          "doc_id": "Pathology_Robbins_3368",
+          "source": "textbook",
+          "span_text": "The disease typically manifests with abrupt development of the nephrotic syndrome in an otherwise healthy child. There is no hypertension, and renal function is preserved in most of these patients."
+        }
+      ]
+    },
+    {
+      "number": 23,
+      "topic": "Nephrotic Syndrome",
+      "competency": "Pathology",
+      "stem": "A patient with nephrotic syndrome presents with significant proteinuria. What is the primary mechanism underlying this symptom?",
+      "options": {
+        "A": "Mechanical obstruction of the renal vessels",
+        "B": "Immunological damage to the glomeruli",
+        "C": "Infective complications of immunodepressive therapy",
+        "D": "Metabolic disorders secondary to corticosteroid therapy"
+      },
+      "answer_key": "B",
+      "explanation": "The primary mechanism underlying significant proteinuria in nephrotic syndrome is immunological damage to the glomeruli, leading to increased permeability and loss of protein in the urine.",
+      "evidence": [
+        {
+          "doc_id": "pubmed23n0032_4897",
+          "source": "pubmed",
+          "span_text": "immunological, as immunune complex glomerulonephritis or, more frequently, as amyloid disease"
+        }
+      ]
+    }
+  ]
+}
