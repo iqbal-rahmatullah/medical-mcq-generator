@@ -23,7 +23,7 @@ export default function HomePage() {
   const [topics, setTopics] = useState<TopicEntry[]>([
     {
       id: "topic-1",
-      topic: "Cardiology",
+      topic: "Cancer",
       competency: "Diagnosis",
       n_questions: 5,
     },
@@ -41,7 +41,8 @@ export default function HomePage() {
         question,
         sourceIndex,
         isCovered:
-          displayLanguage !== "id" || hasIndonesianTranslationCoverage(question),
+          displayLanguage !== "id" ||
+          hasIndonesianTranslationCoverage(question),
       }))
       .sort((left, right) => {
         if (left.isCovered === right.isCovered) {

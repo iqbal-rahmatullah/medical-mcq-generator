@@ -175,14 +175,13 @@ class LLMClient:
                 )
                 self._target_offset = index
                 return content
-            if self._last_error_kind != "rate_limit":
-                return None
+            # Any error → try the next target unconditionally
             next_index = (index + 1) % len(targets)
             self._target_offset = next_index
             if step < len(targets) - 1:
                 next_target = targets[next_index]
                 LOGGER.warning(
-                    "Rate limited; falling back from provider=%s model=%s key=%s to provider=%s model=%s key=%s",
+                    "LLM failed; falling back from provider=%s model=%s key=%s to provider=%s model=%s key=%s",
                     target.get("provider"),
                     target.get("model"),
                     _mask_key(
@@ -697,6 +696,14 @@ def _select_log_key(
 def _classify_error(exc: Exception) -> str:
     if _is_rate_limit_error(exc):
         return "rate_limit"
+    # Treat 401 Unauthorized as a distinct auth error so it triggers fallback
+    for attr in ("status_code", "status", "code"):
+        code = getattr(exc, attr, None)
+        if code == 401:
+            return "auth_error"
+    message = str(exc).lower()
+    if "401" in message or "unauthorized" in message or "authentication" in message:
+        return "auth_error"
     return "request_error"
 
 
