@@ -1,14 +1,18 @@
 'use client'
 
 import Link from 'next/link'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 import Footer from '../../../components/Footer'
 import Navbar from '../../../components/Navbar'
 import QuestionCard from '../../../components/QuestionCard'
 import SectionCard from '../../../components/SectionCard'
-import type { Options } from '../../lib/generate'
 import { loadHistory, type HistoryEntry } from '../../lib/history'
+import { exportDOCX, exportJSON, exportPDF } from '../../lib/export'
+import {
+  resolveQuestionForDisplay,
+  type DisplayLanguage,
+} from '../../lib/question-display'
 
 type HistoryDetailPageProps = {
   params: {
@@ -19,6 +23,9 @@ type HistoryDetailPageProps = {
 export default function HistoryDetailPage({ params }: HistoryDetailPageProps) {
   const [entry, setEntry] = useState<HistoryEntry | null>(null)
   const [isReady, setIsReady] = useState(false)
+  const [exportOpen, setExportOpen] = useState(false)
+  const [displayLanguage, setDisplayLanguage] = useState<DisplayLanguage>('en')
+  const exportRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     const all = loadHistory()
@@ -26,6 +33,18 @@ export default function HistoryDetailPage({ params }: HistoryDetailPageProps) {
     setEntry(found)
     setIsReady(true)
   }, [params.id])
+
+  // Close export dropdown on outside click
+  useEffect(() => {
+    if (!exportOpen) return
+    const handler = (e: MouseEvent) => {
+      if (exportRef.current && !exportRef.current.contains(e.target as Node)) {
+        setExportOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [exportOpen])
 
   const summary = useMemo(() => {
     if (!entry) {
@@ -46,6 +65,14 @@ export default function HistoryDetailPage({ params }: HistoryDetailPageProps) {
     }
   }, [entry])
 
+  const handleExport = (format: 'json' | 'pdf' | 'docx') => {
+    if (!entry) return
+    setExportOpen(false)
+    if (format === 'json') exportJSON(entry.results, displayLanguage)
+    else if (format === 'pdf') exportPDF(entry.results, displayLanguage)
+    else exportDOCX(entry.results, displayLanguage)
+  }
+
   return (
     <div className='app-shell'>
       <Navbar />
@@ -54,9 +81,102 @@ export default function HistoryDetailPage({ params }: HistoryDetailPageProps) {
           <SectionCard
             title='History Detail'
             action={
-              <Link href='/history' className='ghost-button is-compact'>
-                Back to history
-              </Link>
+              <div className='section-actions'>
+                <Link href='/history' className='ghost-button is-compact'>
+                  Back to history
+                </Link>
+                {entry && entry.results.length > 0 ? (
+                  <div
+                    className='language-selector'
+                    role='group'
+                    aria-label='Display language'
+                  >
+                    <label
+                      className={`lang-radio-label${displayLanguage === 'en' ? ' active' : ''}`}
+                    >
+                      <input
+                        type='radio'
+                        name='history-display-language'
+                        value='en'
+                        checked={displayLanguage === 'en'}
+                        onChange={() => setDisplayLanguage('en')}
+                        className='lang-radio-input'
+                      />
+                      🇬🇧 EN
+                    </label>
+                    <label
+                      className={`lang-radio-label${displayLanguage === 'id' ? ' active' : ''}`}
+                    >
+                      <input
+                        type='radio'
+                        name='history-display-language'
+                        value='id'
+                        checked={displayLanguage === 'id'}
+                        onChange={() => setDisplayLanguage('id')}
+                        className='lang-radio-input'
+                      />
+                      🇮🇩 ID
+                    </label>
+                  </div>
+                ) : null}
+                {entry && entry.results.length > 0 ? (
+                  <div className='export-dropdown' ref={exportRef}>
+                    <button
+                      id='history-export-btn'
+                      type='button'
+                      className='export-trigger'
+                      onClick={() => setExportOpen((o) => !o)}
+                      aria-haspopup='true'
+                      aria-expanded={exportOpen}
+                    >
+                      <span>⬇</span> Export
+                    </button>
+                    {exportOpen ? (
+                      <div className='export-menu' role='menu'>
+                        <button
+                          id='history-export-json-btn'
+                          type='button'
+                          className='export-menu-item'
+                          role='menuitem'
+                          onClick={() => handleExport('json')}
+                        >
+                          <span className='export-icon'>{}</span>
+                          <span>
+                            <strong>JSON</strong>
+                            <small>Raw data</small>
+                          </span>
+                        </button>
+                        <button
+                          id='history-export-pdf-btn'
+                          type='button'
+                          className='export-menu-item'
+                          role='menuitem'
+                          onClick={() => handleExport('pdf')}
+                        >
+                          <span className='export-icon'>📕</span>
+                          <span>
+                            <strong>PDF</strong>
+                            <small>Print-ready exam</small>
+                          </span>
+                        </button>
+                        <button
+                          id='history-export-docx-btn'
+                          type='button'
+                          className='export-menu-item'
+                          role='menuitem'
+                          onClick={() => handleExport('docx')}
+                        >
+                          <span className='export-icon'>📘</span>
+                          <span>
+                            <strong>DOCX</strong>
+                            <small>Editable document</small>
+                          </span>
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
             }
           >
             {!isReady ? (
@@ -114,40 +234,30 @@ export default function HistoryDetailPage({ params }: HistoryDetailPageProps) {
                 {entry.results.length ? (
                   <div className='question-list'>
                     {entry.results.map((question, index) => {
-                      const options: Options = question.options || {
-                        A: '-',
-                        B: '-',
-                        C: '-',
-                        D: '-',
-                      }
-                      const evidenceItems = (question.evidence || [])
-                        .map((item) => {
-                          const docId = item.doc_id || ''
-                          const source = item.source || ''
-                          const span = item.span_text || ''
-                          return {
-                            docId,
-                            source,
-                            span,
-                          }
-                        })
+                      const resolved = resolveQuestionForDisplay(question, displayLanguage)
+                      const evidenceItems = (resolved.evidence || [])
+                        .map((item) => ({
+                          docId: item.doc_id || '',
+                          source: item.source || '',
+                          span: item.span_text || '',
+                        }))
                         .filter((item) => item.docId || item.span)
 
                       return (
                         <QuestionCard
                           key={`${entry.id}-${index}`}
                           index={index + 1}
-                          topic={question.topic || ''}
-                          competency={question.competency || ''}
-                          prompt={question.stem || 'Question text unavailable.'}
+                          topic={resolved.topic}
+                          competency={resolved.competency}
+                          prompt={resolved.stem || 'Question text unavailable.'}
                           options={[
-                            { key: 'A' as const, text: options.A || '-' },
-                            { key: 'B' as const, text: options.B || '-' },
-                            { key: 'C' as const, text: options.C || '-' },
-                            { key: 'D' as const, text: options.D || '-' },
+                            { key: 'A' as const, text: resolved.options.A || '-' },
+                            { key: 'B' as const, text: resolved.options.B || '-' },
+                            { key: 'C' as const, text: resolved.options.C || '-' },
+                            { key: 'D' as const, text: resolved.options.D || '-' },
                           ]}
-                          selectedKey={question.answer_key}
-                          explanation={question.explanation || ''}
+                          selectedKey={resolved.answer_key}
+                          explanation={resolved.explanation || ''}
                           evidence={
                             evidenceItems.length
                               ? {
@@ -156,7 +266,7 @@ export default function HistoryDetailPage({ params }: HistoryDetailPageProps) {
                                 }
                               : undefined
                           }
-                          status={question.status}
+                          status={resolved.status}
                         />
                       )
                     })}
