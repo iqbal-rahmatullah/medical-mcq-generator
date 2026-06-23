@@ -27,6 +27,7 @@ from app.retrieval.retriever import RetrievalResult, Retriever
 from app.schemas.request import GenerateRequestItem
 from app.schemas.response import Meta, Options, QuestionItem, QuestionStatus
 from app.logging.logger import log_run
+from app.logging.latency_logger import LatencyTracker
 from app.logging.question_bank import append_question_bank, load_question_bank
 from app.verification.gate import CrossCoVeReviewer, ReviewerClient, VerificationResult, verify_questions
 from app.schemas.response import EvidenceItem
@@ -1114,6 +1115,7 @@ def run_pipeline_stream(
     run_id = uuid.uuid4().hex
     run_timestamp = datetime.utcnow().isoformat() + "Z"
     run_log_items: List[Dict[str, object]] = []
+    latency_tracker = LatencyTracker(run_id)
     input_batch = [item.model_dump() for item in payload]
     total_questions = sum(max(item.n_questions, 1) for item in payload)
     completed = 0
@@ -1320,6 +1322,7 @@ def run_pipeline_stream(
                 shared_retrieval_cache: Dict[str, tuple] = {}
                 last_best_question = None
                 for question_index in range(1, item.n_questions + 1):
+                    latency_tracker.begin_question()
                     question = None
                     normalized_stem = ""
                     local_attempt_stems: List[str] = []
@@ -1343,6 +1346,13 @@ def run_pipeline_stream(
                                 item_doc_ids,
                                 retrieval_cache=shared_retrieval_cache,
                             )
+                            # Record latency for this attempt
+                            for log in attempt_logs:
+                                latency_tracker.record_attempt(
+                                    retrieval_ms=log.get("runtime_ms", {}).get("retrieval", 0.0) if isinstance(log.get("runtime_ms"), dict) else log.get("retrieval_ms", 0.0),
+                                    llm_ms=log.get("runtime_ms", {}).get("llm", 0.0) if isinstance(log.get("runtime_ms"), dict) else log.get("llm_ms", 0.0),
+                                    verification_ms=log.get("runtime_ms", {}).get("verification", 0.0) if isinstance(log.get("runtime_ms"), dict) else log.get("verification_ms", 0.0),
+                                )
                             for log in attempt_logs:
                                 log["question_index"] = question_index
                                 log["dedup_attempt"] = dedup_attempt
@@ -1385,6 +1395,9 @@ def run_pipeline_stream(
                         if ok_only_deadline is not None:
                             time_exceeded = time.perf_counter() > ok_only_deadline
                         if ok_round < ok_only_max_rounds and not time_exceeded:
+                            latency_tracker.record_retry(
+                                reason="Cross-CoVe verification"
+                            )
                             continue
                         break
 
@@ -1491,6 +1504,12 @@ def run_pipeline_stream(
                         bank_questions.append(question)
                         bank_normalized.add(normalized_stem)
 
+                    latency_tracker.finish_question(
+                        topic=item.topic,
+                        competency=item.competency,
+                        status=question.status,
+                    )
+
                     completed += 1
                     event = build_question_event(
                         question, item_index, question_index
@@ -1511,6 +1530,7 @@ def run_pipeline_stream(
                 continue
 
             for question_index in range(1, item.n_questions + 1):
+                latency_tracker.begin_question()
                 question = None
                 normalized_stem = ""
                 for dedup_attempt in range(1, _MAX_DEDUP_ATTEMPTS + 1):
@@ -1524,6 +1544,12 @@ def run_pipeline_stream(
                         avoid_stems,
                         run_used_doc_ids,
                     )
+                    for log in attempt_logs:
+                        latency_tracker.record_attempt(
+                            retrieval_ms=log.get("runtime_ms", {}).get("retrieval", 0.0) if isinstance(log.get("runtime_ms"), dict) else log.get("retrieval_ms", 0.0),
+                            llm_ms=log.get("runtime_ms", {}).get("llm", 0.0) if isinstance(log.get("runtime_ms"), dict) else log.get("llm_ms", 0.0),
+                            verification_ms=log.get("runtime_ms", {}).get("verification", 0.0) if isinstance(log.get("runtime_ms"), dict) else log.get("verification_ms", 0.0),
+                        )
                     for log in attempt_logs:
                         log["question_index"] = question_index
                         log["dedup_attempt"] = dedup_attempt
@@ -1561,6 +1587,11 @@ def run_pipeline_stream(
                     used_stems.append(question.stem)
                     run_used_stems.append(question.stem)
                     run_used_normalized.add(normalized_stem)
+                latency_tracker.finish_question(
+                    topic=item.topic,
+                    competency=item.competency,
+                    status=question.status,
+                )
                 completed += 1
                 event = build_question_event(question, item_index, question_index)
                 if event is not None:
@@ -1640,6 +1671,12 @@ def run_pipeline_stream(
                     "verification_reports": item_reports,
                 }
             )
+
+    # Finalize latency tracking and write CSV/JSONL
+    try:
+        latency_tracker.finalize()
+    except Exception as exc:
+        LOGGER.warning("Failed to finalize latency tracker: %s", exc)
 
     run_record = {
         "run_id": run_id,

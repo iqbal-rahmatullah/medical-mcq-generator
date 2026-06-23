@@ -40,6 +40,7 @@ htmlcov/
 
 # Run logs
 app/logging/*.jsonl
+app/logging/latency_*.csv
 
 # Next.js
 web/node_modules/
