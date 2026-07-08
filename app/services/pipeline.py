@@ -1,134 +1,47 @@
+"""Pipeline orchestration: run_pipeline_stream and run_pipeline_batch."""
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 import pickle
-import re
 import time
 import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Iterator, List, Optional
-import hashlib
 
 from app.core.config import settings
 from app.corpus.loaders import load_pubmed_hf, load_textbooks_hf
-from app.corpus.models import Document
 from app.corpus.store import DocumentStore
-from app.generation.evidence_format import extract_evidence_spans, render_evidence
 from app.generation.llm_client import LLMClient
-from app.generation.prompt_templates import build_prompt
 from app.retrieval.bm25 import BM25Index
 from app.retrieval.medcpt_runtime import MedCPTRuntime
-from app.retrieval.pubmed_web import fetch_pubmed_documents
-from app.retrieval.query_builder import build_query, build_query_minimal, build_query_varied
-from app.retrieval.retriever import RetrievalResult, Retriever
+from app.retrieval.retriever import Retriever
 from app.schemas.request import GenerateRequestItem
-from app.schemas.response import Meta, Options, QuestionItem, QuestionStatus
+from app.schemas.response import QuestionItem, QuestionStatus
 from app.logging.logger import log_run
 from app.logging.latency_logger import LatencyTracker
 from app.logging.question_bank import append_question_bank, load_question_bank
-from app.verification.gate import CrossCoVeReviewer, ReviewerClient, VerificationResult, verify_questions
-from app.schemas.response import EvidenceItem
+from app.services._pipeline_utils import (
+    _build_failure_question,
+    _exact_question_hash,
+    _GENERIC_FAILURE_MESSAGE,
+    _normalize_stem,
+    _reattach_evidence_from_cache,
+    _select_bank_question,
+    _summarize_failure_reason,
+    _truncate_log,
+)
+from app.services._question_generator import _generate_single_question
+from app.services._reviewers import _get_cross_cove_reviewer, _get_reviewer_client
+import hashlib  # noqa: E402 (used in _build_retriever_cache_fingerprint)
 
 LOGGER = logging.getLogger(__name__)
 
 _RETRIEVER: Optional[Retriever] = None
 _RETRIEVER_ERROR: Optional[str] = None
 _LLM_CLIENT: Optional[LLMClient] = None
-_MAX_ATTEMPTS = max(settings.LLM_MAX_ATTEMPTS, 1)
-_CANDIDATES_PER_ATTEMPT = max(settings.LLM_CANDIDATES, 1)
 _MAX_DEDUP_ATTEMPTS = max(settings.LLM_DEDUP_ATTEMPTS, 1)
-_REQUOTE_INSTRUCTION = "re-quote exact evidence span"
-_STRICT_JSON_INSTRUCTION = (
-    "Return only valid JSON for the requested schema. "
-    "Do not include extra text, markdown, or code fences. "
-    "Ensure answer_key is one of A/B/C/D; if insufficient evidence, use 'A'. "
-    "Do not omit any required keys; do not return empty options or an empty stem."
-)
-_EVIDENCE_FOCUS_INSTRUCTION = (
-    "Ensure the correct answer is directly supported by the evidence and "
-    "quote the exact supporting span."
-)
-_DEDUPLICATE_INSTRUCTION = (
-    "Generate a different question from previous ones; avoid repeating stems."
-)
-_GENERIC_FAILURE_MESSAGE = "generation_failed"
-_V2_FAILED_CHECKS = {
-    "evidence_span_mismatch",
-    "evidence_span_empty",
-    "evidence_doc_missing",
-}
-_REWRITE_TOKEN_RE = re.compile(r"[A-Za-z0-9]+")
-
-
-def _summarize_failure_reason(question: QuestionItem) -> str:
-    verification_meta = question.meta.verification or {}
-    retrieval_meta = question.meta.retrieval or {}
-    reason = (
-        verification_meta.get("error")
-        or retrieval_meta.get("error")
-        or question.explanation
-        or question.status
-    )
-    return str(reason)
-
-
-def _build_failure_question(
-    item: GenerateRequestItem,
-    status: QuestionStatus,
-    error_message: str,
-) -> QuestionItem:
-    meta = Meta(
-        retrieval={"error": error_message},
-        verification={"error": error_message},
-        timings_ms={},
-    )
-    return QuestionItem(
-        topic=item.topic,
-        competency=item.competency,
-        stem="",
-        options=Options(A="", B="", C="", D=""),
-        answer_key="A",
-        explanation=error_message,
-        evidence=[],
-        status=status,
-        meta=meta,
-    )
-
-
-_PUBMED_CACHE: Dict[str, List[Document]] = {}
-
-
-def _fetch_pubmed_fallback(query: str) -> List[Document]:
-    if not settings.PUBMED_WEB_ENABLED:
-        return []
-    if query in _PUBMED_CACHE:
-        LOGGER.info("\nPubMed cache hit: query=%s docs=%s", query[:60], len(_PUBMED_CACHE[query]))
-        return _PUBMED_CACHE[query]
-    result = fetch_pubmed_documents(
-        query,
-        max_results=max(settings.PUBMED_WEB_MAX_RESULTS, 0),
-        api_key=(settings.PUBMED_API_KEY or "").strip() or None,
-        email=(settings.PUBMED_EMAIL or "").strip() or None,
-        timeout_sec=max(settings.PUBMED_WEB_TIMEOUT_SEC, 1.0),
-    )
-    _PUBMED_CACHE[query] = result
-    return result
-
-
-def build_failure_batch(
-    payload: List[GenerateRequestItem],
-    error_message: str,
-    status: QuestionStatus = "FAILED_VERIFICATION",
-) -> List[QuestionItem]:
-    results: List[QuestionItem] = []
-    for item in payload:
-        count = max(item.n_questions, 1)
-        for _ in range(count):
-            results.append(_build_failure_question(item, status, error_message))
-    return results
 
 
 def _get_llm_client() -> LLMClient:
@@ -138,363 +51,13 @@ def _get_llm_client() -> LLMClient:
     return _LLM_CLIENT
 
 
-def _get_reviewer_client() -> Optional[ReviewerClient]:
-    provider = (
-        settings.REVIEWER_PROVIDER or settings.LLM_PROVIDER or ""
-    ).strip().lower()
-    model = (settings.REVIEWER_MODEL or settings.LLM_MODEL or "").strip()
-    if not model:
-        return None
-
-    api_base = (settings.REVIEWER_API_BASE or settings.LLM_API_BASE or "").strip()
-    timeout_sec = settings.REVIEWER_TIMEOUT_SEC or settings.LLM_TIMEOUT_SEC
-    api_key = (settings.REVIEWER_API_KEY or "").strip()
-    groq_api_key = ""
-    cerebras_api_key = ""
-
-    if provider in ("groq", "groq_sdk", "groq_cloud"):
-        groq_api_key = api_key or (settings.GROQ_API_KEY or "").strip()
-        api_key = api_key or (settings.LLM_API_KEY or "").strip()
-        if not (groq_api_key or api_key):
-            return None
-    elif provider in ("cerebras", "cerebras_sdk", "cerebras_cloud"):
-        cerebras_api_key = api_key or (settings.CEREBRAS_API_KEY or "").strip()
-        api_key = api_key or (settings.LLM_API_KEY or "").strip()
-        if not (cerebras_api_key or api_key):
-            return None
-    elif provider in ("openai_compatible", "openai", "gemini_sdk", "gemini", "google_genai"):
-        api_key = api_key or (settings.LLM_API_KEY or "").strip()
-        if not api_key:
-            return None
-
-    reviewer_llm = LLMClient(
-        api_key=api_key or None,
-        api_base=api_base or None,
-        model=model,
-        timeout_sec=timeout_sec,
-        provider=provider or None,
-        groq_api_key=groq_api_key or None,
-        cerebras_api_key=cerebras_api_key or None,
-        fallback_targets_json=settings.REVIEWER_FALLBACKS,
-        max_completion_tokens=settings.REVIEWER_MAX_COMPLETION_TOKENS,
-    )
-    return ReviewerClient(reviewer_llm, model_name=model)
-
-
-def _create_reviewer_from_config(
-    provider: str,
-    api_key: str,
-    model: str,
-    fallbacks_json: str = "",
-    api_base: str = "",
-) -> Optional[ReviewerClient]:
-    """Create a single reviewer client from config with fallback support."""
-    if not model or not provider:
-        return None
-    
-    timeout_sec = settings.REVIEWER_TIMEOUT_SEC or settings.LLM_TIMEOUT_SEC
-    cerebras_api_key = ""
-    groq_api_key = ""
-    
-    provider_lower = provider.strip().lower()
-    
-    if provider_lower in ("cerebras", "cerebras_sdk", "cerebras_cloud"):
-        cerebras_api_key = api_key
-    elif provider_lower in ("groq", "groq_sdk", "groq_cloud"):
-        groq_api_key = api_key
-    
-    try:
-        llm_client = LLMClient(
-            api_key=api_key or None,
-            api_base=api_base or None,
-            model=model,
-            timeout_sec=timeout_sec,
-            provider=provider_lower or None,
-            groq_api_key=groq_api_key or None,
-            cerebras_api_key=cerebras_api_key or None,
-            fallback_targets_json=fallbacks_json,
-            max_completion_tokens=settings.REVIEWER_MAX_COMPLETION_TOKENS,
-        )
-        return ReviewerClient(llm_client, model_name=model)
-    except Exception as exc:
-        LOGGER.warning("Failed to create reviewer for model %s: %s", model, exc)
-        return None
-
-
-def _get_cross_cove_reviewer() -> Optional[CrossCoVeReviewer]:
-    """Create CrossCoVeReviewer with 3 different models for majority voting."""
-    if not settings.COVE_ENABLED:
-        return None
-    
-    reviewers: List[ReviewerClient] = []
-    
-    # Reviewer 1
-    r1 = _create_reviewer_from_config(
-        settings.REVIEWER_1_PROVIDER or settings.REVIEWER_PROVIDER,
-        settings.REVIEWER_1_API_KEY or settings.REVIEWER_API_KEY,
-        settings.REVIEWER_1_MODEL or settings.REVIEWER_MODEL,
-        settings.REVIEWER_1_FALLBACKS,
-        api_base=settings.REVIEWER_1_API_BASE or settings.REVIEWER_API_BASE or "",
-    )
-    if r1:
-        reviewers.append(r1)
-    
-    # Reviewer 2
-    r2 = _create_reviewer_from_config(
-        settings.REVIEWER_2_PROVIDER or settings.REVIEWER_PROVIDER,
-        settings.REVIEWER_2_API_KEY or settings.REVIEWER_API_KEY,
-        settings.REVIEWER_2_MODEL,
-        settings.REVIEWER_2_FALLBACKS,
-        api_base=settings.REVIEWER_2_API_BASE or settings.REVIEWER_API_BASE or "",
-    )
-    if r2:
-        reviewers.append(r2)
-    
-    # Reviewer 3
-    r3 = _create_reviewer_from_config(
-        settings.REVIEWER_3_PROVIDER or settings.REVIEWER_PROVIDER,
-        settings.REVIEWER_3_API_KEY or settings.REVIEWER_API_KEY,
-        settings.REVIEWER_3_MODEL,
-        settings.REVIEWER_3_FALLBACKS,
-        api_base=settings.REVIEWER_3_API_BASE or settings.REVIEWER_API_BASE or "",
-    )
-    if r3:
-        reviewers.append(r3)
-    
-    if len(reviewers) < 2:
-        LOGGER.warning(
-            "Cross-CoVe requires at least 2 reviewers, got %d. Falling back to single reviewer.",
-            len(reviewers),
-        )
-        return None
-    
-    LOGGER.info(
-        "Cross-CoVe initialized with %d reviewers: %s",
-        len(reviewers),
-        [r._model_name for r in reviewers],
-    )
-    
-    return CrossCoVeReviewer(reviewers)
-
-
-def _rewrite_query(topic: str, competency: str) -> str:
-    base = build_query(topic, competency).strip()
-    tokens = _REWRITE_TOKEN_RE.findall(competency)
-    if not tokens:
-        return base
-    return f"{base} {' '.join(tokens)}".strip()
-
-
-def _summarize_verification_results(
-    verification_results: List[VerificationResult],
-) -> tuple[Dict[str, int], List[str]]:
-    status_counts = {
-        "OK": 0,
-        "INSUFFICIENT_EVIDENCE": 0,
-        "FAILED_VERIFICATION": 0,
-    }
-    failed_checks = set()
-    for result in verification_results:
-        status = result.question.status
-        status_counts[status] = status_counts.get(status, 0) + 1
-        failed_checks.update(result.report.failed_checks)
-    return status_counts, sorted(failed_checks)
-
-
-def _normalize_stem(value: str) -> str:
-    return " ".join(value.strip().lower().split())
-
-
-def _exact_question_hash(question: "QuestionItem") -> str:
-    opts = question.options
-    content = "|".join([
-        _normalize_stem(question.stem or ""),
-        _normalize_stem(opts.A or ""),
-        _normalize_stem(opts.B or ""),
-        _normalize_stem(opts.C or ""),
-        _normalize_stem(opts.D or ""),
-        (question.answer_key or "").upper(),
-    ])
-    return hashlib.sha256(content.encode()).hexdigest()
-
-
-def _reattach_evidence_from_cache(
-    question: "QuestionItem",
-    retrieval_cache: Dict[str, tuple],
-) -> None:
-    """Re-attach evidence to a question with empty evidence using cached retrieval docs."""
-    if question.evidence:
-        return
-    if not retrieval_cache:
-        return
-
-    stem_words = set(question.stem.lower().split())
-
-    best_docs = []
-    for _cache_key, (retrieval_result, _ms) in retrieval_cache.items():
-        if not hasattr(retrieval_result, "evidence_docs"):
-            continue
-        for doc in retrieval_result.evidence_docs:
-            text = getattr(doc, "text", "") or ""
-            doc_words = set(text.lower().split())
-            overlap = len(stem_words & doc_words) / max(len(stem_words), 1)
-            best_docs.append((overlap, doc))
-
-    best_docs.sort(key=lambda x: x[0], reverse=True)
-
-    attached = []
-    for score, doc in best_docs[:3]:
-        if score < 0.05:
-            continue
-        text_snippet = (getattr(doc, "text", "") or "")[:500]
-        source = "textbook"
-        doc_id = getattr(doc, "doc_id", "")
-        if "pubmed_web" in doc_id:
-            source = "pubmed_web"
-        elif "pubmed" in doc_id:
-            source = "pubmed"
-        attached.append(
-            EvidenceItem(
-                source=source,
-                doc_id=doc_id,
-                title=getattr(doc, "title", "") or "",
-                span_text=text_snippet,
-            )
-        )
-
-    if attached:
-        question.evidence = attached
-        LOGGER.info(
-            "Evidence re-attached: stem=%s docs=%d",
-            _truncate_log(question.stem, 80),
-            len(attached),
-        )
-
-
-def _truncate_log(value: str, limit: int = 160) -> str:
-    cleaned = value.strip()
-    if len(cleaned) <= limit:
-        return cleaned
-    return f"{cleaned[:limit - 3].rstrip()}..."
-
-
-def _format_doc_ids(doc_ids: List[str], limit: int = 4) -> str:
-    if not doc_ids:
-        return "none"
-    head = ", ".join(doc_ids[:limit])
-    if len(doc_ids) <= limit:
-        return head
-    return f"{head}, ... (+{len(doc_ids) - limit})"
-
-
-def _matches_topic_competency(
-    question: QuestionItem, topic: str, competency: str
-) -> bool:
-    return (
-        question.topic.strip().lower() == topic.strip().lower()
-        and question.competency.strip().lower() == competency.strip().lower()
-    )
-
-
-def _select_bank_question(
-    bank_questions: List[QuestionItem],
-    topic: str,
-    competency: str,
-    avoid_normalized: set[str],
-    allow_any_topic: bool,
-) -> Optional[QuestionItem]:
-    candidates = [
-        question
-        for question in bank_questions
-        if question.status == "OK"
-        and question.stem
-        and _normalize_stem(question.stem) not in avoid_normalized
-    ]
-    if not candidates:
-        return None
-    matching = [q for q in candidates if _matches_topic_competency(q, topic, competency)]
-    if matching:
-        return QuestionItem.model_validate(matching[0].model_dump())
-    if allow_any_topic:
-        return QuestionItem.model_validate(candidates[0].model_dump())
-    return None
-
-
-def _merge_instructions(*parts: Optional[str]) -> Optional[str]:
-    merged = " ".join(part.strip() for part in parts if part and part.strip())
-    return merged or None
-
-
-def _build_dedupe_instruction(avoid_stems: List[str], limit: int = 2) -> Optional[str]:
-    if not avoid_stems:
-        return None
-    snippets: List[str] = []
-    for stem in avoid_stems[-limit:]:
-        snippet = stem.strip().replace("\n", " ")
-        if len(snippet) > 120:
-            snippet = f"{snippet[:117].rstrip()}..."
-        if snippet:
-            snippets.append(snippet)
-    if not snippets:
-        return _DEDUPLICATE_INSTRUCTION
-    return f"{_DEDUPLICATE_INSTRUCTION} Avoid these stems: {'; '.join(snippets)}."
-
-
-def _get_llm_error_reason(question: QuestionItem) -> Optional[str]:
-    for meta in (question.meta.verification, question.meta.retrieval):
-        if isinstance(meta, dict):
-            error = meta.get("error")
-            if isinstance(error, str) and error.strip():
-                return error
-    return None
-
-
-def _load_corpus() -> DocumentStore:
-    store = DocumentStore()
-    pubmed_limit = max(settings.CORPUS_PUBMED_MAX_DOCS, 0)
-    pubmed_count = 0
-    textbook_limit = max(settings.CORPUS_TEXTBOOKS_MAX_DOCS, 0)
-    textbook_count = 0
-
-    try:
-        for doc in load_pubmed_hf(
-            settings.CORPUS_PUBMED_HF_DATASET,
-            local_files_only=settings.CORPUS_HF_LOCAL_ONLY,
-            streaming=settings.CORPUS_HF_STREAMING,
-        ):
-            if store.add(doc):
-                pubmed_count += 1
-            if pubmed_limit and pubmed_count >= pubmed_limit:
-                break
-    except Exception as exc:
-        LOGGER.warning("Pubmed HF load failed: %s", exc)
-
-    try:
-        for doc in load_textbooks_hf(
-            settings.CORPUS_TEXTBOOKS_HF_DATASET,
-            local_files_only=settings.CORPUS_HF_LOCAL_ONLY,
-            streaming=settings.CORPUS_HF_STREAMING,
-        ):
-            if store.add(doc):
-                textbook_count += 1
-            if textbook_limit and textbook_count >= textbook_limit:
-                break
-    except Exception as exc:
-        LOGGER.warning("Textbooks HF load failed: %s", exc)
-
-    return store
-
-
 def _is_dev_environment() -> bool:
-    env = (settings.environment or "").strip().lower()
-    return env in {"local", "development", "dev"}
+    return (settings.environment or "").strip().lower() in {"local", "development", "dev"}
 
 
 def _get_retriever_cache_path() -> Optional[Path]:
     cache_path = (settings.RETRIEVER_CACHE_PATH or "").strip()
-    if not cache_path:
-        return None
-    return Path(cache_path).expanduser()
+    return Path(cache_path).expanduser() if cache_path else None
 
 
 def _build_retriever_cache_fingerprint() -> str:
@@ -509,8 +72,7 @@ def _build_retriever_cache_fingerprint() -> str:
         "bm25_k1": 1.5,
         "bm25_b": 0.75,
     }
-    encoded = json.dumps(payload, sort_keys=True).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
+    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
 
 
 def _load_cached_bm25_index() -> Optional[BM25Index]:
@@ -543,15 +105,48 @@ def _write_cached_bm25_index(index: BM25Index) -> None:
         return
     try:
         cache_path.parent.mkdir(parents=True, exist_ok=True)
-        payload = {
-            "fingerprint": _build_retriever_cache_fingerprint(),
-            "bm25_index": index,
-        }
+        payload = {"fingerprint": _build_retriever_cache_fingerprint(), "bm25_index": index}
         with cache_path.open("wb") as handle:
             pickle.dump(payload, handle, protocol=pickle.HIGHEST_PROTOCOL)
         LOGGER.info("Saved retriever cache to %s", cache_path)
     except Exception as exc:
         LOGGER.warning("Failed to write retriever cache: %s", exc)
+
+
+def _load_corpus() -> DocumentStore:
+    store = DocumentStore()
+    pubmed_limit = max(settings.CORPUS_PUBMED_MAX_DOCS, 0)
+    textbook_limit = max(settings.CORPUS_TEXTBOOKS_MAX_DOCS, 0)
+    pubmed_count = 0
+    textbook_count = 0
+
+    try:
+        for doc in load_pubmed_hf(
+            settings.CORPUS_PUBMED_HF_DATASET,
+            local_files_only=settings.CORPUS_HF_LOCAL_ONLY,
+            streaming=settings.CORPUS_HF_STREAMING,
+        ):
+            if store.add(doc):
+                pubmed_count += 1
+            if pubmed_limit and pubmed_count >= pubmed_limit:
+                break
+    except Exception as exc:
+        LOGGER.warning("Pubmed HF load failed: %s", exc)
+
+    try:
+        for doc in load_textbooks_hf(
+            settings.CORPUS_TEXTBOOKS_HF_DATASET,
+            local_files_only=settings.CORPUS_HF_LOCAL_ONLY,
+            streaming=settings.CORPUS_HF_STREAMING,
+        ):
+            if store.add(doc):
+                textbook_count += 1
+            if textbook_limit and textbook_count >= textbook_limit:
+                break
+    except Exception as exc:
+        LOGGER.warning("Textbooks HF load failed: %s", exc)
+
+    return store
 
 
 def _get_retriever() -> Optional[Retriever]:
@@ -569,13 +164,13 @@ def _get_retriever() -> Optional[Retriever]:
                 return None
             index = BM25Index.build(store.iter_docs())
             _write_cached_bm25_index(index)
+
         medcpt_runtime = None
         if settings.RETRIEVAL_MODE == "hybrid_rerank":
             try:
                 medcpt_runtime = MedCPTRuntime()
             except Exception as exc:
                 LOGGER.exception("Failed to init MedCPT runtime: %s", exc)
-                medcpt_runtime = None
 
         _RETRIEVER = Retriever(index, medcpt_runtime=medcpt_runtime)
         return _RETRIEVER
@@ -585,522 +180,16 @@ def _get_retriever() -> Optional[Retriever]:
         return None
 
 
-def _generate_single_question(
-    item: GenerateRequestItem,
-    retriever: Retriever,
-    llm_client: LLMClient,
-    reviewer_client: Optional[ReviewerClient],
-    cross_cove_reviewer: Optional[CrossCoVeReviewer],
-    avoid_stems: List[str],
-    used_doc_ids: Optional[set[str]] = None,
-    retrieval_cache: Optional[Dict[str, tuple]] = None,
-) -> tuple[QuestionItem, List[Dict[str, object]]]:
-    attempt_history: List[Dict[str, object]] = []
-    attempt_logs: List[Dict[str, object]] = []
-    final_question: Optional[QuestionItem] = None
-    initial_top_k = max(settings.EVIDENCE_TOP_K, 0)
-    expanded_top_k = max(settings.EVIDENCE_TOP_K_EXPANDED, 0)
-    evidence_top_k = initial_top_k
-    query_override: Optional[str] = None
-    extra_instructions: Optional[str] = None
-    attempt_reason = "initial"
-    override_docs: Optional[List[Document]] = None
-    override_reason: Optional[str] = None
-    override_retrieval_ms = 0.0
-    track_doc_ids = used_doc_ids is not None
-    doc_id_tracker = used_doc_ids if used_doc_ids is not None else set()
-    final_evidence_doc_ids: List[str] = []
-    v2_requote_count = 0
-    _retrieval_cache = retrieval_cache if retrieval_cache is not None else {}
-
-    for attempt in range(1, _MAX_ATTEMPTS + 1):
-        query_used = (query_override or "").strip() or build_query(
-            item.topic, item.competency
-        )
-        pubmed_query = build_query_minimal(item.topic, item.competency)
-        attempt_reason_used = attempt_reason
-        retrieval_mode = settings.RETRIEVAL_MODE
-        web_retrieval_ms = 0.0
-        pubmed_attempted = False
-        pubmed_docs_count = 0
-
-        LOGGER.info(
-            "\nAttempt start: topic=%s competency=%s attempt=%s reason=%s evidence_top_k=%s query=%s",
-            item.topic,
-            item.competency,
-            attempt,
-            attempt_reason_used,
-            evidence_top_k,
-            _truncate_log(query_used),
-        )
-
-        if override_docs is not None:
-            retrieval_mode = "pubmed_web"
-            attempt_reason_used = override_reason or attempt_reason
-            retrieval_result = RetrievalResult(
-                doc_ids=[doc.doc_id for doc in override_docs],
-                evidence_docs=override_docs,
-                bm25_doc_ids=[],
-                dense_doc_ids=[],
-                fused_doc_ids=[doc.doc_id for doc in override_docs],
-            )
-            retrieval_ms = override_retrieval_ms
-        else:
-            excluded_key = frozenset(doc_id_tracker) if doc_id_tracker else frozenset()
-            cache_key = f"{query_used}|{evidence_top_k}|{excluded_key}"
-            if cache_key in _retrieval_cache:
-                retrieval_result, retrieval_ms = _retrieval_cache[cache_key]
-                retrieval_ms = 0.0 
-                LOGGER.info(
-                    "\nRetrieval cached: topic=%s competency=%s attempt=%s (skipped ~14s)",
-                    item.topic, item.competency, attempt,
-                )
-            else:
-                retrieval_start = time.perf_counter()
-                retrieval_result = retriever.retrieve(
-                    item.topic,
-                    item.competency,
-                    evidence_top_k=evidence_top_k,
-                    query_override=query_override,
-                    exclude_doc_ids=doc_id_tracker if doc_id_tracker else None,
-                )
-                retrieval_ms = (time.perf_counter() - retrieval_start) * 1000.0
-                _retrieval_cache[cache_key] = (retrieval_result, retrieval_ms)
-
-            if not retrieval_result.evidence_docs:
-                web_start = time.perf_counter()
-                pubmed_attempted = True
-                pubmed_docs = _fetch_pubmed_fallback(pubmed_query)
-                web_retrieval_ms = (time.perf_counter() - web_start) * 1000.0
-                retrieval_ms += web_retrieval_ms
-                pubmed_docs_count = len(pubmed_docs)
-                if pubmed_docs:
-                    retrieval_mode = "pubmed_web"
-                    attempt_reason_used = "pubmed_web_fallback"
-                    override_docs = pubmed_docs
-                    override_reason = "pubmed_web_fallback"
-                    override_retrieval_ms = web_retrieval_ms
-                    retrieval_result = RetrievalResult(
-                        doc_ids=[doc.doc_id for doc in pubmed_docs],
-                        evidence_docs=pubmed_docs,
-                        bm25_doc_ids=[],
-                        dense_doc_ids=[],
-                        fused_doc_ids=[doc.doc_id for doc in pubmed_docs],
-                    )
-
-        LOGGER.info(
-            "\nRetrieval done: topic=%s competency=%s attempt=%s mode=%s ms=%.1f evidence_docs=%s bm25=%s dense=%s fused=%s pubmed_attempted=%s pubmed_docs=%s",
-            item.topic,
-            item.competency,
-            attempt,
-            retrieval_mode,
-            retrieval_ms,
-            len(retrieval_result.evidence_docs),
-            len(retrieval_result.bm25_doc_ids),
-            len(retrieval_result.dense_doc_ids),
-            len(retrieval_result.fused_doc_ids),
-            pubmed_attempted,
-            pubmed_docs_count,
-        )
-
-        if not retrieval_result.evidence_docs:
-            LOGGER.warning(
-                "\nRetrieval empty: topic=%s competency=%s attempt=%s reason=%s",
-                item.topic,
-                item.competency,
-                attempt,
-                attempt_reason_used,
-            )
-            attempt_logs.append(
-                {
-                    "attempt": attempt,
-                    "reason": attempt_reason_used,
-                    "query": query_used,
-                    "evidence_top_k": evidence_top_k,
-                    "prompt_hash": "",
-                    "evidence_doc_ids": {
-                        "bm25": retrieval_result.bm25_doc_ids,
-                        "dense": retrieval_result.dense_doc_ids,
-                        "fused": retrieval_result.fused_doc_ids,
-                    },
-                    "runtime_ms": {
-                        "retrieval": retrieval_ms,
-                        "llm": 0.0,
-                        "verification": 0.0,
-                    },
-                    "retrieval_mode": retrieval_mode,
-                    "pubmed_web": {
-                        "attempted": pubmed_attempted,
-                        "docs": pubmed_docs_count,
-                        "runtime_ms": web_retrieval_ms,
-                    },
-                    "status_counts": {"INSUFFICIENT_EVIDENCE": 1},
-                    "failed_checks": ["insufficient_evidence"],
-                }
-            )
-            attempt_history.append(
-                {
-                    "attempt": attempt,
-                    "reason": attempt_reason_used,
-                    "query": query_used,
-                    "evidence_top_k": evidence_top_k,
-                    "retrieval_ms": retrieval_ms,
-                    "retrieval_mode": retrieval_mode,
-                    "pubmed_web": {
-                        "attempted": pubmed_attempted,
-                        "docs": pubmed_docs_count,
-                        "runtime_ms": web_retrieval_ms,
-                    },
-                    "status_counts": {"INSUFFICIENT_EVIDENCE": 1},
-                    "failed_checks": ["insufficient_evidence"],
-                }
-            )
-            if attempt < _MAX_ATTEMPTS:
-                evidence_top_k = expanded_top_k
-                query_override = _rewrite_query(item.topic, item.competency)
-                attempt_reason = "v3_insufficient"
-                extra_instructions = None
-                continue
-            final_question = _build_failure_question(
-                item,
-                status="INSUFFICIENT_EVIDENCE",
-                error_message="insufficient_evidence",
-            )
-            final_question.meta.retrieval.setdefault(
-                "retrieval_mode", settings.RETRIEVAL_MODE
-            )
-            final_question.meta.timings_ms.setdefault("retrieval", retrieval_ms)
-            final_question.meta.timings_ms.setdefault("llm", 0.0)
-            final_question.meta.timings_ms.setdefault("verification", 0.0)
-            break
-
-        evidence_docs = list(retrieval_result.evidence_docs)
-        if avoid_stems and evidence_docs:
-            offset = len(avoid_stems) % len(evidence_docs)
-            if offset:
-                evidence_docs = evidence_docs[offset:] + evidence_docs[:offset]
-        evidence_reused = False
-        if doc_id_tracker:
-            fresh_docs = [
-                doc for doc in evidence_docs if doc.doc_id not in doc_id_tracker
-            ]
-            if fresh_docs:
-                evidence_docs = fresh_docs
-            else:
-                evidence_reused = True
-                if attempt < _MAX_ATTEMPTS:
-                    did_adjust = False
-                    if evidence_top_k < expanded_top_k:
-                        evidence_top_k = expanded_top_k
-                        did_adjust = True
-                    if not query_override:
-                        query_override = _rewrite_query(item.topic, item.competency)
-                        did_adjust = True
-                    if did_adjust:
-                        attempt_reason = "v8_evidence_diversity"
-                        extra_instructions = None
-                        continue
-        evidence_docs_for_prompt = evidence_docs
-        if settings.EVIDENCE_FIRST:
-            extracted_docs = extract_evidence_spans(
-                evidence_docs,
-                item.topic,
-                item.competency,
-                max_sentences_per_doc=settings.EVIDENCE_FIRST_MAX_SENTENCES,
-                max_chars_per_doc=settings.EVIDENCE_FIRST_MAX_CHARS,
-            )
-            if extracted_docs:
-                evidence_docs_for_prompt = extracted_docs
-        evidence_doc_ids = [doc.doc_id for doc in evidence_docs_for_prompt]
-        LOGGER.info(
-            "\nPrompt evidence: topic=%s competency=%s attempt=%s docs=%s reused=%s ids=%s",
-            item.topic,
-            item.competency,
-            attempt,
-            len(evidence_docs_for_prompt),
-            evidence_reused,
-            _format_doc_ids(evidence_doc_ids),
-        )
-        dedupe_instruction = _build_dedupe_instruction(avoid_stems)
-        combined_instructions = _merge_instructions(extra_instructions, dedupe_instruction)
-        evidence_text = render_evidence(
-            evidence_docs_for_prompt,
-            max_chars_per_doc=settings.EVIDENCE_MAX_CHARS_PER_DOC,
-            max_total_chars=settings.EVIDENCE_MAX_TOTAL_CHARS,
-        )
-        candidate_count = _CANDIDATES_PER_ATTEMPT
-        LOGGER.info(
-            "\nLLM generate: topic=%s competency=%s attempt=%s candidates=%s",
-            item.topic,
-            item.competency,
-            attempt,
-            candidate_count,
-        )
-        prompt = build_prompt(
-            item.topic,
-            item.competency,
-            evidence_text,
-            candidate_count,
-            extra_instructions=combined_instructions,
-            language=item.language,
-        )
-        prompt_hash = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
-        llm_start = time.perf_counter()
-        questions = llm_client.generate_mcq(
-            item.topic,
-            item.competency,
-            evidence_text,
-            candidate_count,
-            extra_instructions=combined_instructions,
-            language=item.language,
-        )
-        llm_ms = (time.perf_counter() - llm_start) * 1000.0
-
-        verification_start = time.perf_counter()
-        verification_docs = evidence_docs_for_prompt
-        verification_results = verify_questions(
-            questions,
-            verification_docs,
-            reviewer=reviewer_client,
-            cross_cove_reviewer=cross_cove_reviewer,
-            run_reviewer=True,
-        )
-        verification_ms = (time.perf_counter() - verification_start) * 1000.0
-
-        for result in verification_results:
-            question = result.question
-            question.meta.retrieval.setdefault("doc_ids", retrieval_result.doc_ids)
-            question.meta.retrieval.setdefault("evidence_doc_ids", evidence_doc_ids)
-            question.meta.retrieval.setdefault("retrieval_mode", retrieval_mode)
-            question.meta.timings_ms.setdefault("retrieval", retrieval_ms)
-            question.meta.timings_ms.setdefault("llm", llm_ms)
-            question.meta.timings_ms.setdefault("verification", verification_ms)
-
-        normalized_avoid = {_normalize_stem(stem) for stem in avoid_stems}
-        candidate_infos = []
-        for candidate_index, result in enumerate(verification_results):
-            question = result.question
-            normalized_stem = _normalize_stem(question.stem or "")
-            is_duplicate = bool(normalized_stem and normalized_stem in normalized_avoid)
-            candidate_failed_checks = list(result.report.failed_checks)
-            if is_duplicate:
-                candidate_failed_checks = sorted(
-                    set(candidate_failed_checks) | {"duplicate_question"}
-                )
-            candidate_infos.append(
-                {
-                    "index": candidate_index,
-                    "question": question,
-                    "failed_checks": candidate_failed_checks,
-                    "is_duplicate": is_duplicate,
-                }
-            )
-
-        selected = next(
-            (
-                info
-                for info in candidate_infos
-                if info["question"].status == "OK" and not info["failed_checks"]
-            ),
-            None,
-        )
-        if selected is None:
-            selected = min(
-                candidate_infos,
-                key=lambda info: (
-                    0 if info["question"].status == "OK" else 1,
-                    len(info["failed_checks"]),
-                    info["index"],
-                ),
-            )
-
-        question_result = selected["question"]
-        is_duplicate = selected["is_duplicate"]
-        selected_failed_checks = selected["failed_checks"]
-        llm_error = _get_llm_error_reason(question_result)
-
-        status_counts, aggregate_failed_checks = _summarize_verification_results(
-            verification_results
-        )
-        if is_duplicate:
-            aggregate_failed_checks = sorted(
-                set(aggregate_failed_checks) | {"duplicate_question"}
-            )
-        LOGGER.info(
-            "\nVerification summary: topic=%s competency=%s attempt=%s status_counts=%s failed_checks=%s selected_failed=%s",
-            item.topic,
-            item.competency,
-            attempt,
-            status_counts,
-            aggregate_failed_checks,
-            selected_failed_checks,
-        )
-        attempt_logs.append(
-            {
-                "attempt": attempt,
-                "reason": attempt_reason_used,
-                "query": query_used,
-                "evidence_top_k": evidence_top_k,
-                "candidate_count": candidate_count,
-                "selected_index": selected["index"] + 1,
-                "prompt_hash": prompt_hash,
-                "evidence_doc_ids": {
-                    "bm25": retrieval_result.bm25_doc_ids,
-                    "dense": retrieval_result.dense_doc_ids,
-                    "fused": retrieval_result.fused_doc_ids,
-                },
-                "runtime_ms": {
-                    "retrieval": retrieval_ms,
-                    "llm": llm_ms,
-                    "verification": verification_ms,
-                },
-                "retrieval_mode": retrieval_mode,
-                "pubmed_web": {
-                    "attempted": pubmed_attempted,
-                    "docs": pubmed_docs_count,
-                    "runtime_ms": web_retrieval_ms,
-                },
-                "status_counts": status_counts,
-                "failed_checks": selected_failed_checks,
-                "failed_checks_all": aggregate_failed_checks,
-                "evidence_doc_ids_used": evidence_doc_ids,
-                "evidence_reused": evidence_reused,
-            }
-        )
-        attempt_history.append(
-            {
-                "attempt": attempt,
-                "reason": attempt_reason_used,
-                "query": query_used,
-                "evidence_top_k": evidence_top_k,
-                "candidate_count": candidate_count,
-                "selected_index": selected["index"] + 1,
-                "retrieval_ms": retrieval_ms,
-                "llm_ms": llm_ms,
-                "verification_ms": verification_ms,
-                "extra_instructions": extra_instructions or "",
-                "retrieval_mode": retrieval_mode,
-                "pubmed_web": {
-                    "attempted": pubmed_attempted,
-                    "docs": pubmed_docs_count,
-                    "runtime_ms": web_retrieval_ms,
-                },
-                "status_counts": status_counts,
-                "failed_checks": selected_failed_checks,
-                "failed_checks_all": aggregate_failed_checks,
-                "evidence_doc_ids_used": evidence_doc_ids,
-                "evidence_reused": evidence_reused,
-            }
-        )
-
-        if question_result.status == "OK" and not selected_failed_checks:
-            final_question = question_result
-            final_evidence_doc_ids = evidence_doc_ids
-            break
-
-        if attempt < _MAX_ATTEMPTS:
-            if (
-                retrieval_mode != "pubmed_web"
-                and (
-                    "topic_coverage" in selected_failed_checks
-                    or question_result.status == "INSUFFICIENT_EVIDENCE"
-                )
-            ):
-                web_start = time.perf_counter()
-                pubmed_attempted = True
-                pubmed_docs = _fetch_pubmed_fallback(pubmed_query)
-                web_retrieval_ms = (time.perf_counter() - web_start) * 1000.0
-                pubmed_docs_count = len(pubmed_docs)
-                if attempt_logs:
-                    attempt_logs[-1]["pubmed_web"] = {
-                        "attempted": pubmed_attempted,
-                        "docs": pubmed_docs_count,
-                        "runtime_ms": web_retrieval_ms,
-                    }
-                if attempt_history:
-                    attempt_history[-1]["pubmed_web"] = {
-                        "attempted": pubmed_attempted,
-                        "docs": pubmed_docs_count,
-                        "runtime_ms": web_retrieval_ms,
-                    }
-                if pubmed_docs:
-                    override_docs = pubmed_docs
-                    override_reason = "pubmed_web_fallback"
-                    override_retrieval_ms = web_retrieval_ms
-                    attempt_reason = "pubmed_web_fallback"
-                    extra_instructions = None
-                    continue
-            if question_result.status == "INSUFFICIENT_EVIDENCE" or (
-                "missing_evidence" in selected_failed_checks
-            ):
-                evidence_top_k = expanded_top_k
-                query_override = _rewrite_query(item.topic, item.competency)
-                attempt_reason = "v3_insufficient"
-                extra_instructions = None
-                continue
-            if "duplicate_question" in selected_failed_checks:
-                extra_instructions = _merge_instructions(
-                    _DEDUPLICATE_INSTRUCTION,
-                    _EVIDENCE_FOCUS_INSTRUCTION,
-                )
-                attempt_reason = "v7_deduplicate"
-                continue
-            if llm_error in ("invalid_json", "short", "empty_response") or (
-                "schema_validation" in selected_failed_checks
-            ):
-                extra_instructions = _STRICT_JSON_INSTRUCTION
-                attempt_reason = "v4_json_strict"
-                continue
-            if any(check in _V2_FAILED_CHECKS for check in selected_failed_checks):
-                v2_requote_count += 1
-                extra_instructions = _REQUOTE_INSTRUCTION
-            
-                if v2_requote_count >= 2:
-                    query_override = build_query_varied(
-                        item.topic, item.competency, variation_index=v2_requote_count - 2
-                    )
-                    attempt_reason = "v2_requote_varied"
-                    LOGGER.info(
-                        "\nQuery variation applied: topic=%s competency=%s v2_count=%s query=%s",
-                        item.topic,
-                        item.competency,
-                        v2_requote_count,
-                        _truncate_log(query_override),
-                    )
-                else:
-                    attempt_reason = "v2_requote"
-                continue
-            if any(
-                check in ("reviewer_mismatch", "reviewer_insufficient")
-                for check in selected_failed_checks
-            ):
-                extra_instructions = _EVIDENCE_FOCUS_INSTRUCTION
-                attempt_reason = "v5_reviewer"
-                continue
-            if question_result.status != "OK":
-                extra_instructions = _EVIDENCE_FOCUS_INSTRUCTION
-                attempt_reason = "v6_retry"
-                continue
-
-        final_question = question_result
-        final_evidence_doc_ids = evidence_doc_ids
-        break
-
-    if final_question is None:
-        final_question = _build_failure_question(
-            item,
-            status="FAILED_VERIFICATION",
-            error_message="pipeline_error",
-        )
-
-    if track_doc_ids and final_question.status == "OK" and final_evidence_doc_ids:
-        doc_id_tracker.update(final_evidence_doc_ids)
-
-    verification_meta = dict(final_question.meta.verification or {})
-    verification_meta["attempt_history"] = attempt_history
-    final_question.meta.verification = verification_meta
-
-    return final_question, attempt_logs
+def build_failure_batch(
+    payload: List[GenerateRequestItem],
+    error_message: str,
+    status: QuestionStatus = "FAILED_VERIFICATION",
+) -> List[QuestionItem]:
+    results: List[QuestionItem] = []
+    for item in payload:
+        for _ in range(max(item.n_questions, 1)):
+            results.append(_build_failure_question(item, status, error_message))
+    return results
 
 
 def run_pipeline_stream(
@@ -1120,23 +209,17 @@ def run_pipeline_stream(
     total_questions = sum(max(item.n_questions, 1) for item in payload)
     completed = 0
     run_used_stems: List[str] = []
-    run_used_normalized = set()
+    run_used_normalized: set[str] = set()
     run_used_hashes: set[str] = set()
-    run_used_doc_ids = set()
+    run_used_doc_ids: set[str] = set()
     ok_only_mode = settings.OK_ONLY_MODE
     ok_only_max_rounds = max(settings.OK_ONLY_MAX_ROUNDS, 1)
     ok_only_max_seconds = max(settings.OK_ONLY_MAX_SECONDS, 0.0)
     bank_questions: List[QuestionItem] = []
     bank_normalized: set[str] = set()
-    if ok_only_mode and (
-        settings.QUESTION_BANK_FALLBACK or settings.QUESTION_BANK_WRITE_OK
-    ):
+    if ok_only_mode and (settings.QUESTION_BANK_FALLBACK or settings.QUESTION_BANK_WRITE_OK):
         bank_questions = load_question_bank(settings.QUESTION_BANK_PATH)
-        bank_normalized = {
-            _normalize_stem(question.stem)
-            for question in bank_questions
-            if question.stem
-        }
+        bank_normalized = {_normalize_stem(q.stem) for q in bank_questions if q.stem}
 
     yield {
         "type": "progress",
@@ -1147,32 +230,18 @@ def run_pipeline_stream(
     }
     LOGGER.info(
         "\nRun start: run_id=%s items=%s total_questions=%s ok_only=%s retrieval_mode=%s",
-        run_id,
-        len(payload),
-        total_questions,
-        ok_only_mode,
-        settings.RETRIEVAL_MODE,
+        run_id, len(payload), total_questions, ok_only_mode, settings.RETRIEVAL_MODE,
     )
 
-    def build_question_event(
+    def _build_question_event(
         question: QuestionItem, item_index: int, question_index: int
     ) -> Optional[Dict[str, object]]:
         if ok_only_mode:
             if question.status != "OK":
                 return None
-            return {
-                "type": "question",
-                "item_index": item_index,
-                "question_index": question_index,
-                "question": question.model_dump(),
-            }
+            return {"type": "question", "item_index": item_index, "question_index": question_index, "question": question.model_dump()}
         if include_failed or question.status == "OK":
-            return {
-                "type": "question",
-                "item_index": item_index,
-                "question_index": question_index,
-                "question": question.model_dump(),
-            }
+            return {"type": "question", "item_index": item_index, "question_index": question_index, "question": question.model_dump()}
         return {
             "type": "question_failed",
             "item_index": item_index,
@@ -1180,6 +249,15 @@ def run_pipeline_stream(
             "status": question.status,
             "message": _summarize_failure_reason(question),
         }
+
+    def _record_latency_for_logs(logs: List[Dict[str, object]]) -> None:
+        for log in logs:
+            rt = log.get("runtime_ms", {})
+            latency_tracker.record_attempt(
+                retrieval_ms=rt.get("retrieval", 0.0) if isinstance(rt, dict) else log.get("retrieval_ms", 0.0),
+                llm_ms=rt.get("llm", 0.0) if isinstance(rt, dict) else log.get("llm_ms", 0.0),
+                verification_ms=rt.get("verification", 0.0) if isinstance(rt, dict) else log.get("verification_ms", 0.0),
+            )
 
     for item_index, item in enumerate(payload, start=1):
         item_attempts: List[Dict[str, object]] = []
@@ -1190,83 +268,48 @@ def run_pipeline_stream(
         try:
             LOGGER.info(
                 "\nItem start: run_id=%s item_index=%s topic=%s competency=%s n_questions=%s",
-                run_id,
-                item_index,
-                item.topic,
-                item.competency,
-                item.n_questions,
+                run_id, item_index, item.topic, item.competency, item.n_questions,
             )
             if item.n_questions < 1:
                 raise ValueError("n_questions must be >= 1")
 
             item_started = time.perf_counter()
-            ok_only_deadline = None
-            if ok_only_mode and ok_only_max_seconds > 0:
-                ok_only_deadline = item_started + ok_only_max_seconds
+            ok_only_deadline = (item_started + ok_only_max_seconds) if ok_only_mode and ok_only_max_seconds > 0 else None
 
             if retriever is None:
                 if ok_only_mode:
+                    item_failed = False
                     pending_questions: List[QuestionItem] = []
                     pending_normalized: set[str] = set()
-                    item_failed = False
+
                     if not settings.QUESTION_BANK_FALLBACK:
-                        LOGGER.error(
-                            "generation_failed: retriever_unavailable and question bank fallback disabled"
-                        )
+                        LOGGER.error("generation_failed: retriever_unavailable and question bank fallback disabled")
                         item_failed = True
-                        remaining = item.n_questions
-                        for _ in range(remaining):
-                            failure_question = _build_failure_question(
-                                item,
-                                status="FAILED_VERIFICATION",
-                                error_message=_GENERIC_FAILURE_MESSAGE,
-                            )
-                            item_outputs.append(failure_question.model_dump())
-                            item_reports.append(
-                                failure_question.meta.verification.get("gate")
-                            )
-                        yield {
-                            "type": "error",
-                            "item_index": item_index,
-                            "message": _GENERIC_FAILURE_MESSAGE,
-                        }
+                        for _ in range(item.n_questions):
+                            fq = _build_failure_question(item, "FAILED_VERIFICATION", _GENERIC_FAILURE_MESSAGE)
+                            item_outputs.append(fq.model_dump())
+                            item_reports.append(fq.meta.verification.get("gate"))
+                        yield {"type": "error", "item_index": item_index, "message": _GENERIC_FAILURE_MESSAGE}
                     else:
                         for question_index in range(1, item.n_questions + 1):
                             avoid_normalized = set(run_used_normalized)
-                            avoid_normalized.update(
-                                _normalize_stem(stem) for stem in used_stems if stem
-                            )
+                            avoid_normalized.update(_normalize_stem(s) for s in used_stems if s)
                             avoid_normalized.update(pending_normalized)
                             fallback_question = _select_bank_question(
-                                bank_questions,
-                                item.topic,
-                                item.competency,
-                                avoid_normalized,
-                                settings.QUESTION_BANK_ALLOW_ANY_TOPIC,
+                                bank_questions, item.topic, item.competency,
+                                avoid_normalized, settings.QUESTION_BANK_ALLOW_ANY_TOPIC,
                             )
                             if fallback_question is None:
                                 LOGGER.error(
                                     "generation_failed: question bank fallback missing for topic=%s competency=%s",
-                                    item.topic,
-                                    item.competency,
+                                    item.topic, item.competency,
                                 )
                                 item_failed = True
-                                remaining = item.n_questions - question_index + 1
-                                for _ in range(remaining):
-                                    failure_question = _build_failure_question(
-                                        item,
-                                        status="FAILED_VERIFICATION",
-                                        error_message=_GENERIC_FAILURE_MESSAGE,
-                                    )
-                                    item_outputs.append(failure_question.model_dump())
-                                    item_reports.append(
-                                        failure_question.meta.verification.get("gate")
-                                    )
-                                yield {
-                                    "type": "error",
-                                    "item_index": item_index,
-                                    "message": _GENERIC_FAILURE_MESSAGE,
-                                }
+                                for _ in range(item.n_questions - question_index + 1):
+                                    fq = _build_failure_question(item, "FAILED_VERIFICATION", _GENERIC_FAILURE_MESSAGE)
+                                    item_outputs.append(fq.model_dump())
+                                    item_reports.append(fq.meta.verification.get("gate"))
+                                yield {"type": "error", "item_index": item_index, "message": _GENERIC_FAILURE_MESSAGE}
                                 break
                             question = fallback_question
                             normalized_stem = _normalize_stem(question.stem or "")
@@ -1276,83 +319,57 @@ def run_pipeline_stream(
                             if question.stem and normalized_stem:
                                 used_stems.append(question.stem)
                                 pending_normalized.add(normalized_stem)
+
                     if item_failed:
                         continue
-
-                    for question_index, question in enumerate(
-                        pending_questions, start=1
-                    ):
+                    for question_index, question in enumerate(pending_questions, start=1):
                         normalized_stem = _normalize_stem(question.stem or "")
                         if question.stem and normalized_stem:
                             run_used_stems.append(question.stem)
                             run_used_normalized.add(normalized_stem)
                         completed += 1
-                        event = build_question_event(
-                            question, item_index, question_index
-                        )
+                        event = _build_question_event(question, item_index, question_index)
                         if event is not None:
                             yield event
-                        yield {
-                            "type": "progress",
-                            "completed": completed,
-                            "total_questions": total_questions,
-                        }
+                        yield {"type": "progress", "completed": completed, "total_questions": total_questions}
                     continue
 
-                failure_questions = build_failure_batch(
-                    [item], "retriever_unavailable"
-                )
-                for question_index, question in enumerate(failure_questions, start=1):
+                for question_index, question in enumerate(
+                    build_failure_batch([item], "retriever_unavailable"), start=1
+                ):
                     item_outputs.append(question.model_dump())
                     item_reports.append(question.meta.verification.get("gate"))
                     completed += 1
-                    event = build_question_event(question, item_index, question_index)
+                    event = _build_question_event(question, item_index, question_index)
                     if event is not None:
                         yield event
-                    yield {
-                        "type": "progress",
-                        "completed": completed,
-                        "total_questions": total_questions,
-                    }
+                    yield {"type": "progress", "completed": completed, "total_questions": total_questions}
                 continue
 
             if ok_only_mode:
                 item_doc_ids: set[str] = set()
                 item_failed = False
                 shared_retrieval_cache: Dict[str, tuple] = {}
-                last_best_question = None
+                last_best_question: Optional[QuestionItem] = None
+
                 for question_index in range(1, item.n_questions + 1):
                     latency_tracker.begin_question()
-                    question = None
+                    question: Optional[QuestionItem] = None
                     normalized_stem = ""
                     local_attempt_stems: List[str] = []
                     ok_round = 0
+
                     while True:
                         ok_round += 1
-                        if ok_only_deadline is not None:
-                            if time.perf_counter() > ok_only_deadline:
-                                break
+                        if ok_only_deadline is not None and time.perf_counter() > ok_only_deadline:
+                            break
                         for dedup_attempt in range(1, _MAX_DEDUP_ATTEMPTS + 1):
-                            avoid_stems = (
-                                used_stems + run_used_stems + local_attempt_stems
-                            )
+                            avoid_stems = used_stems + run_used_stems + local_attempt_stems
                             question, attempt_logs = _generate_single_question(
-                                item,
-                                retriever,
-                                llm_client,
-                                reviewer_client,
-                                cross_cove_reviewer,
-                                avoid_stems,
-                                item_doc_ids,
-                                retrieval_cache=shared_retrieval_cache,
+                                item, retriever, llm_client, reviewer_client, cross_cove_reviewer,
+                                avoid_stems, item_doc_ids, retrieval_cache=shared_retrieval_cache,
                             )
-                            # Record latency for this attempt
-                            for log in attempt_logs:
-                                latency_tracker.record_attempt(
-                                    retrieval_ms=log.get("runtime_ms", {}).get("retrieval", 0.0) if isinstance(log.get("runtime_ms"), dict) else log.get("retrieval_ms", 0.0),
-                                    llm_ms=log.get("runtime_ms", {}).get("llm", 0.0) if isinstance(log.get("runtime_ms"), dict) else log.get("llm_ms", 0.0),
-                                    verification_ms=log.get("runtime_ms", {}).get("verification", 0.0) if isinstance(log.get("runtime_ms"), dict) else log.get("verification_ms", 0.0),
-                                )
+                            _record_latency_for_logs(attempt_logs)
                             for log in attempt_logs:
                                 log["question_index"] = question_index
                                 log["dedup_attempt"] = dedup_attempt
@@ -1361,26 +378,17 @@ def run_pipeline_stream(
                             if question.stem:
                                 local_attempt_stems.append(question.stem)
                             normalized_stem = _normalize_stem(question.stem or "")
-                            if normalized_stem and (
-                                normalized_stem in run_used_normalized
-                            ):
+                            if normalized_stem and normalized_stem in run_used_normalized:
                                 LOGGER.info(
                                     "\nDedup hit (ok_only): topic=%s competency=%s round=%s dedup_attempt=%s stem=%s",
-                                    item.topic,
-                                    item.competency,
-                                    ok_round,
-                                    dedup_attempt,
+                                    item.topic, item.competency, ok_round, dedup_attempt,
                                     _truncate_log(question.stem or ""),
                                 )
-                                verification_meta = dict(
-                                    question.meta.verification or {}
-                                )
-                                verification_meta.setdefault(
-                                    "error", "duplicate_question"
-                                )
-                                verification_meta["duplicate"] = True
-                                verification_meta["dedup_attempt"] = dedup_attempt
-                                question.meta.verification = verification_meta
+                                vm = dict(question.meta.verification or {})
+                                vm.setdefault("error", "duplicate_question")
+                                vm["duplicate"] = True
+                                vm["dedup_attempt"] = dedup_attempt
+                                question.meta.verification = vm
                                 question.status = "FAILED_VERIFICATION"
                                 if dedup_attempt < _MAX_DEDUP_ATTEMPTS:
                                     continue
@@ -1391,13 +399,9 @@ def run_pipeline_stream(
                             last_best_question = question
                         if question.status == "OK":
                             break
-                        time_exceeded = False
-                        if ok_only_deadline is not None:
-                            time_exceeded = time.perf_counter() > ok_only_deadline
+                        time_exceeded = ok_only_deadline is not None and time.perf_counter() > ok_only_deadline
                         if ok_round < ok_only_max_rounds and not time_exceeded:
-                            latency_tracker.record_retry(
-                                reason="Cross-CoVe verification"
-                            )
+                            latency_tracker.record_retry(reason="Cross-CoVe verification")
                             continue
                         break
 
@@ -1405,15 +409,10 @@ def run_pipeline_stream(
                         fallback_question = None
                         if settings.QUESTION_BANK_FALLBACK:
                             avoid_normalized = set(run_used_normalized)
-                            avoid_normalized.update(
-                                _normalize_stem(stem) for stem in used_stems if stem
-                            )
+                            avoid_normalized.update(_normalize_stem(s) for s in used_stems if s)
                             fallback_question = _select_bank_question(
-                                bank_questions,
-                                item.topic,
-                                item.competency,
-                                avoid_normalized,
-                                settings.QUESTION_BANK_ALLOW_ANY_TOPIC,
+                                bank_questions, item.topic, item.competency,
+                                avoid_normalized, settings.QUESTION_BANK_ALLOW_ANY_TOPIC,
                             )
                         if fallback_question is not None:
                             question = fallback_question
@@ -1421,14 +420,12 @@ def run_pipeline_stream(
                         elif question is not None and question.stem:
                             LOGGER.warning(
                                 "Graceful fallback: using best-effort question for topic=%s competency=%s (original status=%s)",
-                                item.topic,
-                                item.competency,
-                                question.status,
+                                item.topic, item.competency, question.status,
                             )
-                            verification_meta = dict(question.meta.verification or {})
-                            verification_meta["graceful_fallback"] = True
-                            verification_meta["original_status"] = question.status
-                            question.meta.verification = verification_meta
+                            vm = dict(question.meta.verification or {})
+                            vm["graceful_fallback"] = True
+                            vm["original_status"] = question.status
+                            question.meta.verification = vm
                             question.status = "OK"
                             normalized_stem = _normalize_stem(question.stem or "")
                             _reattach_evidence_from_cache(question, shared_retrieval_cache)
@@ -1436,55 +433,39 @@ def run_pipeline_stream(
                             question = last_best_question
                             LOGGER.warning(
                                 "Graceful fallback (from last_best): using best-effort question for topic=%s competency=%s (original status=%s)",
-                                item.topic,
-                                item.competency,
-                                question.status,
+                                item.topic, item.competency, question.status,
                             )
-                            verification_meta = dict(question.meta.verification or {})
-                            verification_meta["graceful_fallback"] = True
-                            verification_meta["original_status"] = question.status
-                            question.meta.verification = verification_meta
+                            vm = dict(question.meta.verification or {})
+                            vm["graceful_fallback"] = True
+                            vm["original_status"] = question.status
+                            question.meta.verification = vm
                             question.status = "OK"
                             normalized_stem = _normalize_stem(question.stem or "")
                             _reattach_evidence_from_cache(question, shared_retrieval_cache)
                         else:
                             LOGGER.error(
                                 "generation_failed: OK-only attempts exhausted for topic=%s competency=%s",
-                                item.topic,
-                                item.competency,
+                                item.topic, item.competency,
                             )
                             item_failed = True
-                            remaining = item.n_questions - question_index + 1
-                            for _ in range(remaining):
-                                failure_question = _build_failure_question(
-                                    item,
-                                    status="FAILED_VERIFICATION",
-                                    error_message=_GENERIC_FAILURE_MESSAGE,
-                                )
-                                item_outputs.append(failure_question.model_dump())
-                                item_reports.append(
-                                    failure_question.meta.verification.get("gate")
-                                )
-                            yield {
-                                "type": "error",
-                                "item_index": item_index,
-                                "message": _GENERIC_FAILURE_MESSAGE,
-                            }
+                            for _ in range(item.n_questions - question_index + 1):
+                                fq = _build_failure_question(item, "FAILED_VERIFICATION", _GENERIC_FAILURE_MESSAGE)
+                                item_outputs.append(fq.model_dump())
+                                item_reports.append(fq.meta.verification.get("gate"))
+                            yield {"type": "error", "item_index": item_index, "message": _GENERIC_FAILURE_MESSAGE}
                             break
 
                     q_hash = _exact_question_hash(question)
                     if q_hash in run_used_hashes:
                         LOGGER.warning(
                             "\nExact duplicate suppressed: topic=%s competency=%s stem=%s",
-                            item.topic,
-                            item.competency,
-                            _truncate_log(question.stem or ""),
+                            item.topic, item.competency, _truncate_log(question.stem or ""),
                         )
                         question.status = "FAILED_VERIFICATION"
-                        verification_meta = dict(question.meta.verification or {})
-                        verification_meta["error"] = "duplicate_exact"
-                        verification_meta["duplicate"] = True
-                        question.meta.verification = verification_meta
+                        vm = dict(question.meta.verification or {})
+                        vm["error"] = "duplicate_exact"
+                        vm["duplicate"] = True
+                        question.meta.verification = vm
                     else:
                         run_used_hashes.add(q_hash)
 
@@ -1505,26 +486,16 @@ def run_pipeline_stream(
                         bank_normalized.add(normalized_stem)
 
                     latency_tracker.finish_question(
-                        topic=item.topic,
-                        competency=item.competency,
-                        status=question.status,
+                        topic=item.topic, competency=item.competency, status=question.status,
                     )
-
                     completed += 1
-                    event = build_question_event(
-                        question, item_index, question_index
-                    )
+                    event = _build_question_event(question, item_index, question_index)
                     if event is not None:
                         yield event
-                    yield {
-                        "type": "progress",
-                        "completed": completed,
-                        "total_questions": total_questions,
-                    }
+                    yield {"type": "progress", "completed": completed, "total_questions": total_questions}
 
                 if item_failed:
                     continue
-
                 if item_doc_ids:
                     run_used_doc_ids.update(item_doc_ids)
                 continue
@@ -1536,20 +507,10 @@ def run_pipeline_stream(
                 for dedup_attempt in range(1, _MAX_DEDUP_ATTEMPTS + 1):
                     avoid_stems = used_stems + run_used_stems
                     question, attempt_logs = _generate_single_question(
-                        item,
-                        retriever,
-                        llm_client,
-                        reviewer_client,
-                        cross_cove_reviewer,
-                        avoid_stems,
-                        run_used_doc_ids,
+                        item, retriever, llm_client, reviewer_client, cross_cove_reviewer,
+                        avoid_stems, run_used_doc_ids,
                     )
-                    for log in attempt_logs:
-                        latency_tracker.record_attempt(
-                            retrieval_ms=log.get("runtime_ms", {}).get("retrieval", 0.0) if isinstance(log.get("runtime_ms"), dict) else log.get("retrieval_ms", 0.0),
-                            llm_ms=log.get("runtime_ms", {}).get("llm", 0.0) if isinstance(log.get("runtime_ms"), dict) else log.get("llm_ms", 0.0),
-                            verification_ms=log.get("runtime_ms", {}).get("verification", 0.0) if isinstance(log.get("runtime_ms"), dict) else log.get("verification_ms", 0.0),
-                        )
+                    _record_latency_for_logs(attempt_logs)
                     for log in attempt_logs:
                         log["question_index"] = question_index
                         log["dedup_attempt"] = dedup_attempt
@@ -1558,27 +519,21 @@ def run_pipeline_stream(
                     if normalized_stem and normalized_stem in run_used_normalized:
                         LOGGER.info(
                             "\nDedup hit: topic=%s competency=%s dedup_attempt=%s stem=%s",
-                            item.topic,
-                            item.competency,
-                            dedup_attempt,
+                            item.topic, item.competency, dedup_attempt,
                             _truncate_log(question.stem or ""),
                         )
-                        verification_meta = dict(question.meta.verification or {})
-                        verification_meta.setdefault("error", "duplicate_question")
-                        verification_meta["duplicate"] = True
-                        verification_meta["dedup_attempt"] = dedup_attempt
-                        question.meta.verification = verification_meta
+                        vm = dict(question.meta.verification or {})
+                        vm.setdefault("error", "duplicate_question")
+                        vm["duplicate"] = True
+                        vm["dedup_attempt"] = dedup_attempt
+                        question.meta.verification = vm
                         question.status = "FAILED_VERIFICATION"
                         if dedup_attempt < _MAX_DEDUP_ATTEMPTS:
                             continue
                     break
 
                 if question is None:
-                    question = _build_failure_question(
-                        item,
-                        status="FAILED_VERIFICATION",
-                        error_message="pipeline_error",
-                    )
+                    question = _build_failure_question(item, "FAILED_VERIFICATION", "pipeline_error")
                     normalized_stem = ""
 
                 item_outputs.append(question.model_dump())
@@ -1588,19 +543,13 @@ def run_pipeline_stream(
                     run_used_stems.append(question.stem)
                     run_used_normalized.add(normalized_stem)
                 latency_tracker.finish_question(
-                    topic=item.topic,
-                    competency=item.competency,
-                    status=question.status,
+                    topic=item.topic, competency=item.competency, status=question.status,
                 )
                 completed += 1
-                event = build_question_event(question, item_index, question_index)
+                event = _build_question_event(question, item_index, question_index)
                 if event is not None:
                     yield event
-                yield {
-                    "type": "progress",
-                    "completed": completed,
-                    "total_questions": total_questions,
-                }
+                yield {"type": "progress", "completed": completed, "total_questions": total_questions}
                 if (
                     question.status == "OK"
                     and settings.QUESTION_BANK_WRITE_OK
@@ -1610,69 +559,45 @@ def run_pipeline_stream(
                     append_question_bank(settings.QUESTION_BANK_PATH, question)
                     bank_questions.append(question)
                     bank_normalized.add(normalized_stem)
+
         except ValueError as exc:
             LOGGER.warning("pipeline validation error: %s", exc)
-            failure_questions = build_failure_batch(
-                [item], str(exc), status="FAILED_VERIFICATION"
-            )
-            yield {
-                "type": "error",
-                "item_index": item_index,
-                "message": _GENERIC_FAILURE_MESSAGE if ok_only_mode else str(exc),
-            }
-            for question_index, question in enumerate(failure_questions, start=1):
+            msg = _GENERIC_FAILURE_MESSAGE if ok_only_mode else str(exc)
+            yield {"type": "error", "item_index": item_index, "message": msg}
+            for question_index, question in enumerate(
+                build_failure_batch([item], str(exc), status="FAILED_VERIFICATION"), start=1
+            ):
                 item_outputs.append(question.model_dump())
                 item_reports.append(question.meta.verification.get("gate"))
                 if not ok_only_mode:
                     completed += 1
-                    event = build_question_event(
-                        question, item_index, question_index
-                    )
+                    event = _build_question_event(question, item_index, question_index)
                     if event is not None:
                         yield event
-                    yield {
-                        "type": "progress",
-                        "completed": completed,
-                        "total_questions": total_questions,
-                    }
+                    yield {"type": "progress", "completed": completed, "total_questions": total_questions}
         except Exception as exc:
             LOGGER.exception("pipeline error: %s", exc)
-            failure_questions = build_failure_batch(
-                [item], f"pipeline_error: {exc}", status="FAILED_VERIFICATION"
-            )
-            yield {
-                "type": "error",
-                "item_index": item_index,
-                "message": _GENERIC_FAILURE_MESSAGE
-                if ok_only_mode
-                else f"pipeline_error: {exc}",
-            }
-            for question_index, question in enumerate(failure_questions, start=1):
+            msg = _GENERIC_FAILURE_MESSAGE if ok_only_mode else f"pipeline_error: {exc}"
+            yield {"type": "error", "item_index": item_index, "message": msg}
+            for question_index, question in enumerate(
+                build_failure_batch([item], f"pipeline_error: {exc}", status="FAILED_VERIFICATION"), start=1
+            ):
                 item_outputs.append(question.model_dump())
                 item_reports.append(question.meta.verification.get("gate"))
                 if not ok_only_mode:
                     completed += 1
-                    event = build_question_event(
-                        question, item_index, question_index
-                    )
+                    event = _build_question_event(question, item_index, question_index)
                     if event is not None:
                         yield event
-                    yield {
-                        "type": "progress",
-                        "completed": completed,
-                        "total_questions": total_questions,
-                    }
+                    yield {"type": "progress", "completed": completed, "total_questions": total_questions}
         finally:
-            run_log_items.append(
-                {
-                    "input": item.model_dump(),
-                    "attempts": item_attempts,
-                    "outputs": item_outputs,
-                    "verification_reports": item_reports,
-                }
-            )
+            run_log_items.append({
+                "input": item.model_dump(),
+                "attempts": item_attempts,
+                "outputs": item_outputs,
+                "verification_reports": item_reports,
+            })
 
-    # Finalize latency tracking and write CSV/JSONL
     try:
         latency_tracker.finalize()
     except Exception as exc:
@@ -1691,20 +616,16 @@ def run_pipeline_stream(
     except Exception as exc:
         LOGGER.warning("Failed to log run: %s", exc)
 
-    summary_out = None if ok_only_mode else summary
-
     yield {
         "type": "done",
         "run_id": run_id,
         "completed": completed,
         "total_questions": total_questions,
-        "summary": summary_out,
+        "summary": None if ok_only_mode else summary,
     }
     LOGGER.info(
         "\nRun done: run_id=%s completed=%s total=%s runtime_ms=%.1f",
-        run_id,
-        completed,
-        total_questions,
+        run_id, completed, total_questions,
         (time.perf_counter() - run_started) * 1000.0,
     )
 

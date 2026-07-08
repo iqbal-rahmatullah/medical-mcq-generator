@@ -247,8 +247,6 @@ export default function HistoryDetailPage({ params }: HistoryDetailPageProps) {
                         <QuestionCard
                           key={`${entry.id}-${index}`}
                           index={index + 1}
-                          topic={resolved.topic}
-                          competency={resolved.competency}
                           prompt={resolved.stem || 'Question text unavailable.'}
                           options={[
                             { key: 'A' as const, text: resolved.options.A || '-' },

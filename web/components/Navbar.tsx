@@ -18,11 +18,8 @@ export default function Navbar() {
     <nav className='navbar'>
       <div className='navbar-inner'>
         <div className='brand'>
-          <LogoMark />
-          <div>
-            <p className='brand-title'>MedQGen</p>
-            <p className='brand-subtitle'>Medical MCQ Generator</p>
-          </div>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src='/logo.png' alt='MedQGen' style={{ height: 48, width: 'auto' }} />
         </div>
 
         <div className='nav-right'>
@@ -46,17 +43,6 @@ export default function Navbar() {
         </div>
       </div>
     </nav>
-  )
-}
-
-function LogoMark() {
-  return (
-    <div className='logo-mark' aria-hidden='true'>
-      <svg viewBox='0 0 48 48' role='img'>
-        <rect x='4' y='4' width='40' height='40' rx='12' />
-        <path d='M24 12L36 24L24 36L12 24L24 12Z' />
-      </svg>
-    </div>
   )
 }
 

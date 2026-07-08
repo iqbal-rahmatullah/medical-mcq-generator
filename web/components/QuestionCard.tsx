@@ -16,8 +16,6 @@ type QuestionStatus = "OK" | "INSUFFICIENT_EVIDENCE" | "FAILED_VERIFICATION";
 
 type QuestionCardProps = {
   index: number;
-  topic?: string;
-  competency?: string;
   prompt: string;
   options: QuestionOption[];
   selectedKey?: QuestionOption["key"];
@@ -28,8 +26,6 @@ type QuestionCardProps = {
 
 export default function QuestionCard({
   index,
-  topic,
-  competency,
   prompt,
   options,
   selectedKey,
@@ -38,7 +34,6 @@ export default function QuestionCard({
   status
 }: QuestionCardProps) {
   const showStatus = status && status !== "OK";
-  const showMeta = Boolean(topic || competency);
   const showExplanation = Boolean(selectedKey && explanation);
 
   return (
@@ -49,11 +44,6 @@ export default function QuestionCard({
           <p className="question-text">
             {prompt || "Question text unavailable."}
           </p>
-          {showMeta ? (
-            <p className="question-meta">
-              {[topic, competency].filter(Boolean).join(" · ")}
-            </p>
-          ) : null}
         </div>
         {showStatus ? (
           <span className={`status-chip ${status?.toLowerCase()}`}>{status}</span>

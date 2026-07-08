@@ -74,8 +74,6 @@ export default function HomePage() {
         sourceIndex,
         index: index + 1,
         prompt: resolvedQuestion.stem || "Question text unavailable.",
-        topic: resolvedQuestion.topic,
-        competency: resolvedQuestion.competency,
         options: QUESTION_OPTION_KEYS.map((key) => ({
           key,
           text: resolvedQuestion.options[key] || "-",
@@ -364,8 +362,6 @@ export default function HomePage() {
                     <QuestionCard
                       key={`question-${question.sourceIndex}`}
                       index={question.index}
-                      topic={question.topic}
-                      competency={question.competency}
                       prompt={question.prompt}
                       options={question.options}
                       selectedKey={question.selectedKey}

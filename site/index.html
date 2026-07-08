@@ -1,0 +1,860 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MedQGen — AI-Powered Medical MCQ Generator</title>
+  <meta name="description" content="Generate clinically accurate medical multiple-choice questions using RAG retrieval, Cross-CoVe verification, and multi-provider LLMs." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Sora:wght@600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #f4f6fb;
+      --surface: #ffffff;
+      --surface-muted: #f0f4ff;
+      --border: #e2e8f3;
+      --ink: #182335;
+      --muted: #637083;
+      --accent: #1d6bff;
+      --accent-strong: #1357d2;
+      --accent-soft: rgba(29, 107, 255, 0.10);
+      --info-bg: #eef5ff;
+      --info-text: #1d5ed8;
+      --shadow-sm: 0 8px 20px rgba(24, 35, 53, 0.06);
+      --shadow: 0 20px 40px rgba(24, 35, 53, 0.08);
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Manrope', 'Trebuchet MS', sans-serif;
+      background: var(--bg);
+      color: var(--ink);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ── Navbar ── */
+    .navbar {
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      box-shadow: 0 8px 20px rgba(24, 35, 53, 0.04);
+    }
+    .navbar-inner {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 16px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+    .brand { display: flex; align-items: center; gap: 12px; text-decoration: none; color: inherit; }
+    .brand-logo { height: 56px; width: auto; display: block; }
+    .brand-title {
+      font-family: 'Sora', sans-serif;
+      font-weight: 700;
+      font-size: 1.05rem;
+      color: var(--ink);
+    }
+    .brand-subtitle { font-size: 0.78rem; color: var(--muted); margin-top: 1px; }
+    .nav-links { display: flex; align-items: center; gap: 8px; }
+    .nav-pill {
+      padding: 8px 18px;
+      border-radius: 10px;
+      font-size: 0.85rem;
+      font-weight: 700;
+      text-decoration: none;
+      border: 1px solid rgba(29, 107, 255, 0.35);
+      background: var(--accent-soft);
+      color: var(--accent);
+      transition: background 0.15s, transform 0.12s;
+    }
+    .nav-pill:hover { background: rgba(29, 107, 255, 0.18); transform: translateY(-1px); }
+    .nav-pill.ghost { background: transparent; border-color: var(--border); color: var(--muted); }
+    .nav-pill.ghost:hover { color: var(--ink); background: var(--surface-muted); }
+
+    /* ── Hero ── */
+    .hero {
+      padding: 96px 24px 80px;
+      text-align: center;
+      position: relative;
+      overflow: hidden;
+    }
+    .hero::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(ellipse 80% 60% at 50% -10%, rgba(29, 107, 255, 0.10) 0%, transparent 70%);
+      pointer-events: none;
+    }
+    .hero-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 16px;
+      border-radius: 999px;
+      background: var(--info-bg);
+      border: 1px solid rgba(29, 107, 255, 0.18);
+      color: var(--info-text);
+      font-size: 0.78rem;
+      font-weight: 700;
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
+      margin-bottom: 28px;
+    }
+    .hero-badge-dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: var(--accent);
+      animation: pulse-dot 2s ease-in-out infinite;
+    }
+    @keyframes pulse-dot {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.5; transform: scale(0.7); }
+    }
+    .hero h1 {
+      font-family: 'Sora', sans-serif;
+      font-size: clamp(2.2rem, 5vw, 3.6rem);
+      font-weight: 800;
+      line-height: 1.15;
+      color: var(--ink);
+      max-width: 780px;
+      margin: 0 auto 20px;
+    }
+    .hero h1 span {
+      background: linear-gradient(135deg, var(--accent) 0%, #5b9bff 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .hero-desc {
+      font-size: 1.1rem;
+      color: var(--muted);
+      max-width: 580px;
+      margin: 0 auto 40px;
+      line-height: 1.7;
+    }
+    .hero-actions { display: flex; align-items: center; justify-content: center; gap: 12px; flex-wrap: wrap; }
+    .btn-primary {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 14px 28px;
+      border-radius: 12px;
+      background: var(--accent);
+      color: #fff;
+      font-weight: 700;
+      font-size: 0.95rem;
+      text-decoration: none;
+      box-shadow: 0 10px 28px rgba(29, 107, 255, 0.30);
+      transition: transform 0.15s, box-shadow 0.15s;
+    }
+    .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 16px 36px rgba(29, 107, 255, 0.38); }
+    .btn-secondary {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 14px 28px;
+      border-radius: 12px;
+      background: var(--surface);
+      color: var(--ink);
+      font-weight: 700;
+      font-size: 0.95rem;
+      text-decoration: none;
+      border: 1px solid var(--border);
+      box-shadow: var(--shadow-sm);
+      transition: transform 0.15s, border-color 0.15s;
+    }
+    .btn-secondary:hover { transform: translateY(-2px); border-color: rgba(29, 107, 255, 0.35); }
+
+    /* ── Stats ── */
+    .stats-strip {
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+      padding: 28px 24px;
+    }
+    .stats-inner {
+      max-width: 1200px;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 24px;
+    }
+    .stat { text-align: center; }
+    .stat-value {
+      font-family: 'Sora', sans-serif;
+      font-size: 1.8rem;
+      font-weight: 800;
+      color: var(--accent);
+      line-height: 1;
+    }
+    .stat-label { font-size: 0.82rem; color: var(--muted); margin-top: 6px; font-weight: 600; }
+
+    /* ── Section wrapper ── */
+    .section { padding: 80px 24px; }
+    .section-inner { max-width: 1200px; margin: 0 auto; }
+    .section-label {
+      display: inline-block;
+      font-size: 0.72rem;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--accent);
+      background: var(--accent-soft);
+      padding: 5px 12px;
+      border-radius: 999px;
+      margin-bottom: 16px;
+    }
+    .section-title {
+      font-family: 'Sora', sans-serif;
+      font-size: clamp(1.6rem, 3vw, 2.2rem);
+      font-weight: 800;
+      color: var(--ink);
+      margin-bottom: 12px;
+      line-height: 1.25;
+    }
+    .section-desc { font-size: 1rem; color: var(--muted); max-width: 520px; line-height: 1.7; margin-bottom: 48px; }
+
+    /* ── How it works ── */
+    .steps { display: flex; flex-direction: column; gap: 0; position: relative; }
+    .steps::before {
+      content: '';
+      position: absolute;
+      left: 27px;
+      top: 28px;
+      bottom: 28px;
+      width: 2px;
+      background: linear-gradient(to bottom, var(--accent), rgba(29, 107, 255, 0.1));
+      border-radius: 999px;
+    }
+    .step { display: flex; gap: 24px; padding: 24px 0; align-items: flex-start; }
+    .step-num {
+      width: 56px; height: 56px;
+      border-radius: 50%;
+      background: var(--surface);
+      border: 2px solid var(--accent);
+      display: grid; place-items: center;
+      font-family: 'Sora', sans-serif;
+      font-weight: 800;
+      font-size: 1.05rem;
+      color: var(--accent);
+      flex-shrink: 0;
+      position: relative;
+      z-index: 1;
+      box-shadow: 0 0 0 6px var(--bg), var(--shadow-sm);
+    }
+    .step-body { padding-top: 10px; }
+    .step-title { font-weight: 700; font-size: 1rem; color: var(--ink); margin-bottom: 6px; }
+    .step-desc { font-size: 0.9rem; color: var(--muted); line-height: 1.6; }
+    .step-tag {
+      display: inline-block;
+      margin-top: 8px;
+      padding: 3px 10px;
+      border-radius: 999px;
+      font-size: 0.72rem;
+      font-weight: 700;
+      background: var(--info-bg);
+      color: var(--info-text);
+      border: 1px solid rgba(29, 107, 255, 0.15);
+    }
+
+    /* ── Features grid ── */
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 16px;
+    }
+    .feature-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      padding: 24px;
+      box-shadow: var(--shadow-sm);
+      transition: transform 0.18s, border-color 0.18s, box-shadow 0.18s;
+    }
+    .feature-card:hover {
+      transform: translateY(-3px);
+      border-color: rgba(29, 107, 255, 0.3);
+      box-shadow: 0 20px 40px rgba(24, 35, 53, 0.12);
+    }
+    .feature-icon {
+      width: 48px; height: 48px;
+      border-radius: 14px;
+      background: var(--info-bg);
+      display: grid; place-items: center;
+      margin-bottom: 16px;
+    }
+    .feature-icon svg { width: 24px; height: 24px; stroke: var(--accent); fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+    .feature-title { font-weight: 700; font-size: 1rem; color: var(--ink); margin-bottom: 8px; }
+    .feature-desc { font-size: 0.88rem; color: var(--muted); line-height: 1.6; }
+    .feature-chip {
+      display: inline-block;
+      margin-top: 12px;
+      padding: 3px 10px;
+      border-radius: 999px;
+      font-size: 0.72rem;
+      font-weight: 700;
+      background: var(--surface-muted);
+      color: var(--muted);
+      border: 1px solid var(--border);
+    }
+
+    /* ── Architecture ── */
+    .arch-section { background: var(--surface); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+    .arch-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 40px;
+      align-items: center;
+    }
+    .arch-flow {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .arch-layer {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 14px 18px;
+      border-radius: 14px;
+      border: 1px solid var(--border);
+      background: var(--surface-muted);
+      transition: border-color 0.15s;
+    }
+    .arch-layer:hover { border-color: rgba(29, 107, 255, 0.3); }
+    .arch-layer-icon {
+      width: 36px; height: 36px;
+      border-radius: 10px;
+      background: var(--info-bg);
+      display: grid; place-items: center;
+      flex-shrink: 0;
+    }
+    .arch-layer-icon svg { width: 18px; height: 18px; stroke: var(--accent); fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    .arch-layer-name { font-weight: 700; font-size: 0.88rem; color: var(--ink); }
+    .arch-layer-detail { font-size: 0.78rem; color: var(--muted); }
+    .arch-arrow {
+      text-align: center;
+      color: var(--accent);
+      font-size: 1.1rem;
+      padding: 2px 0;
+      opacity: 0.5;
+    }
+    .arch-desc-block { display: flex; flex-direction: column; gap: 20px; }
+    .arch-item { display: flex; gap: 14px; align-items: flex-start; }
+    .arch-item-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--accent);
+      margin-top: 6px;
+      flex-shrink: 0;
+    }
+    .arch-item-title { font-weight: 700; font-size: 0.92rem; color: var(--ink); margin-bottom: 4px; }
+    .arch-item-desc { font-size: 0.85rem; color: var(--muted); line-height: 1.6; }
+
+    /* ── Tech stack ── */
+    .tech-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 12px;
+    }
+    .tech-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 18px 20px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      box-shadow: var(--shadow-sm);
+      transition: transform 0.15s, border-color 0.15s;
+    }
+    .tech-card:hover { transform: translateY(-2px); border-color: rgba(29, 107, 255, 0.25); }
+    .tech-badge {
+      width: 40px; height: 40px;
+      border-radius: 12px;
+      display: grid; place-items: center;
+      font-weight: 800;
+      font-size: 0.72rem;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+      flex-shrink: 0;
+    }
+    .tech-name { font-weight: 700; font-size: 0.9rem; color: var(--ink); }
+    .tech-role { font-size: 0.78rem; color: var(--muted); margin-top: 2px; }
+
+    /* Badge color variants */
+    .badge-blue { background: #dbeafe; color: #1d5ed8; }
+    .badge-green { background: #dcfce7; color: #166534; }
+    .badge-purple { background: #ede9fe; color: #6d28d9; }
+    .badge-orange { background: #fff7ed; color: #c2410c; }
+    .badge-teal { background: #ccfbf1; color: #0f766e; }
+    .badge-rose { background: #ffe4e6; color: #be123c; }
+
+    /* ── CTA Banner ── */
+    .cta-banner {
+      padding: 80px 24px;
+      text-align: center;
+      background: linear-gradient(135deg, #1852c3 0%, #1d6bff 40%, #3b82f6 100%);
+      position: relative;
+      overflow: hidden;
+    }
+    .cta-banner::before {
+      content: '';
+      position: absolute;
+      top: -40%;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 700px; height: 400px;
+      border-radius: 50%;
+      background: rgba(255,255,255,0.05);
+      pointer-events: none;
+    }
+    .cta-title {
+      font-family: 'Sora', sans-serif;
+      font-size: clamp(1.6rem, 3vw, 2.2rem);
+      font-weight: 800;
+      color: #fff;
+      margin-bottom: 12px;
+    }
+    .cta-desc { font-size: 1rem; color: rgba(255,255,255,0.75); margin-bottom: 36px; max-width: 480px; margin-left: auto; margin-right: auto; }
+    .btn-white {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 14px 28px;
+      border-radius: 12px;
+      background: #fff;
+      color: var(--accent-strong);
+      font-weight: 700;
+      font-size: 0.95rem;
+      text-decoration: none;
+      box-shadow: 0 12px 32px rgba(0,0,0,0.2);
+      transition: transform 0.15s, box-shadow 0.15s;
+    }
+    .btn-white:hover { transform: translateY(-2px); box-shadow: 0 18px 40px rgba(0,0,0,0.28); }
+    .btn-outline-white {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 14px 28px;
+      border-radius: 12px;
+      background: transparent;
+      color: #fff;
+      font-weight: 700;
+      font-size: 0.95rem;
+      text-decoration: none;
+      border: 1.5px solid rgba(255,255,255,0.4);
+      transition: background 0.15s, transform 0.15s;
+    }
+    .btn-outline-white:hover { background: rgba(255,255,255,0.12); transform: translateY(-2px); }
+
+    /* ── Footer ── */
+    .footer {
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+      padding: 28px 24px;
+    }
+    .footer-inner {
+      max-width: 1200px;
+      margin: 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+    .footer-brand { display: flex; align-items: center; gap: 10px; }
+    .footer-brand-name { font-family: 'Sora', sans-serif; font-weight: 700; font-size: 0.95rem; color: var(--ink); }
+    .footer-copy { font-size: 0.8rem; color: var(--muted); margin-top: 2px; }
+    .footer-links { display: flex; align-items: center; gap: 20px; }
+    .footer-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--accent);
+      text-decoration: none;
+      font-size: 0.85rem;
+      font-weight: 700;
+      transition: opacity 0.15s;
+    }
+    .footer-link:hover { opacity: 0.75; }
+    .footer-link svg { width: 16px; height: 16px; fill: currentColor; }
+
+    /* ── Responsive ── */
+    @media (max-width: 820px) {
+      .arch-grid { grid-template-columns: 1fr; }
+      .steps::before { left: 23px; }
+      .step-num { width: 46px; height: 46px; font-size: 0.9rem; }
+      .navbar-inner { flex-direction: column; align-items: flex-start; gap: 10px; }
+    }
+    @media (max-width: 480px) {
+      .hero { padding: 64px 20px 56px; }
+      .section { padding: 56px 20px; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ── Navbar ── -->
+<nav class="navbar">
+  <div class="navbar-inner">
+    <a class="brand" href="#">
+      <img src="logo.png" alt="MedQGen" class="brand-logo" />
+    </a>
+    <div class="nav-links">
+      <a class="nav-pill ghost" href="https://github.com/" target="_blank" rel="noopener">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" style="display:inline;vertical-align:middle;margin-right:4px"><path d="M12 2C6.5 2 2 6.5 2 12c0 4.4 2.9 8.1 6.8 9.4.5.1.7-.2.7-.5v-1.8c-2.8.6-3.4-1.2-3.4-1.2-.5-1.2-1.1-1.5-1.1-1.5-.9-.6.1-.6.1-.6 1 .1 1.6 1 1.6 1 .9 1.5 2.4 1.1 3 .8.1-.7.4-1.1.7-1.4-2.2-.2-4.6-1.1-4.6-5 0-1.1.4-2.1 1-2.8-.1-.2-.4-1.3.1-2.6 0 0 .8-.3 2.7 1a9.4 9.4 0 0 1 4.9 0c1.9-1.3 2.7-1 2.7-1 .5 1.3.2 2.4.1 2.6.6.7 1 1.7 1 2.8 0 3.9-2.4 4.8-4.6 5 .4.3.7.9.7 1.8v2.7c0 .3.2.6.7.5A10 10 0 0 0 22 12c0-5.5-4.5-10-10-10Z"/></svg>
+        GitHub
+      </a>
+      <a class="nav-pill" href="#features">Features</a>
+    </div>
+  </div>
+</nav>
+
+<!-- ── Hero ── -->
+<section class="hero">
+  <div class="hero-badge">
+    <span class="hero-badge-dot"></span>
+    Research Project · Undergraduate Thesis
+  </div>
+  <h1>AI-Powered Medical <span>MCQ Generator</span></h1>
+  <p class="hero-desc">
+    Generate clinically accurate multiple-choice questions grounded in evidence from PubMed and medical textbooks, verified by three AI reviewers using Cross-CoVe.
+  </p>
+  <div class="hero-actions">
+    <a class="btn-primary" href="#how-it-works">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l2.5 2.5"/></svg>
+      See How It Works
+    </a>
+    <a class="btn-secondary" href="https://github.com/" target="_blank" rel="noopener">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.5 2 2 6.5 2 12c0 4.4 2.9 8.1 6.8 9.4.5.1.7-.2.7-.5v-1.8c-2.8.6-3.4-1.2-3.4-1.2-.5-1.2-1.1-1.5-1.1-1.5-.9-.6.1-.6.1-.6 1 .1 1.6 1 1.6 1 .9 1.5 2.4 1.1 3 .8.1-.7.4-1.1.7-1.4-2.2-.2-4.6-1.1-4.6-5 0-1.1.4-2.1 1-2.8-.1-.2-.4-1.3.1-2.6 0 0 .8-.3 2.7 1a9.4 9.4 0 0 1 4.9 0c1.9-1.3 2.7-1 2.7-1 .5 1.3.2 2.4.1 2.6.6.7 1 1.7 1 2.8 0 3.9-2.4 4.8-4.6 5 .4.3.7.9.7 1.8v2.7c0 .3.2.6.7.5A10 10 0 0 0 22 12c0-5.5-4.5-10-10-10Z"/></svg>
+      View on GitHub
+    </a>
+  </div>
+</section>
+
+<!-- ── Stats ── -->
+<div class="stats-strip">
+  <div class="stats-inner">
+    <div class="stat">
+      <div class="stat-value">3</div>
+      <div class="stat-label">LLM Reviewers (Cross-CoVe)</div>
+    </div>
+    <div class="stat">
+      <div class="stat-value">BM25 +</div>
+      <div class="stat-label">MedCPT Hybrid Retrieval</div>
+    </div>
+    <div class="stat">
+      <div class="stat-value">5+</div>
+      <div class="stat-label">LLM Providers Supported</div>
+    </div>
+    <div class="stat">
+      <div class="stat-value">3</div>
+      <div class="stat-label">Export Formats (JSON, PDF, DOCX)</div>
+    </div>
+    <div class="stat">
+      <div class="stat-value">EN / ID</div>
+      <div class="stat-label">Multilingual Output</div>
+    </div>
+  </div>
+</div>
+
+<!-- ── How It Works ── -->
+<section class="section" id="how-it-works">
+  <div class="section-inner">
+    <div class="section-label">Pipeline</div>
+    <h2 class="section-title">How it works</h2>
+    <p class="section-desc">Five-stage pipeline from topic input to verified, evidence-grounded MCQ output.</p>
+
+    <div class="steps">
+      <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-body">
+          <p class="step-title">Configure topic &amp; competency</p>
+          <p class="step-desc">Define the medical topic (e.g. "Hypertension") and learning competency. Set how many questions to generate per topic.</p>
+          <span class="step-tag">Next.js UI</span>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-body">
+          <p class="step-title">Retrieve evidence</p>
+          <p class="step-desc">BM25 sparse retrieval combines with MedCPT dense reranking to pull the most relevant passages from PubMed articles and medical textbooks. Falls back to live PubMed Web API when the local corpus returns no results.</p>
+          <span class="step-tag">BM25 + MedCPT Hybrid</span>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-num">3</div>
+        <div class="step-body">
+          <p class="step-title">LLM generates candidates</p>
+          <p class="step-desc">Retrieved evidence is injected into a structured prompt. An LLM (Gemini, Groq, Cerebras, or any OpenAI-compatible provider) generates multiple MCQ candidates in a single call.</p>
+          <span class="step-tag">RAG Prompting</span>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-num">4</div>
+        <div class="step-body">
+          <p class="step-title">Cross-CoVe verification</p>
+          <p class="step-desc">Three independent reviewer LLMs each evaluate every candidate for evidence support, clinical accuracy, and option quality. The question passes only when a majority agrees it is correct.</p>
+          <span class="step-tag">Chain-of-Verification · Majority Vote</span>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-num">5</div>
+        <div class="step-body">
+          <p class="step-title">Export &amp; review</p>
+          <p class="step-desc">Verified questions are displayed with full evidence provenance. Export as JSON, print-ready PDF, or editable DOCX. Switch between English and Indonesian output on the fly.</p>
+          <span class="step-tag">JSON · PDF · DOCX</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── Features ── -->
+<section class="section" id="features" style="background: var(--surface); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);">
+  <div class="section-inner">
+    <div class="section-label">Features</div>
+    <h2 class="section-title">Built for clinical accuracy</h2>
+    <p class="section-desc">Every design decision prioritizes evidence grounding and verifiability over raw generation speed.</p>
+
+    <div class="features-grid">
+
+      <div class="feature-card">
+        <div class="feature-icon">
+          <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35M11 8v6M8 11h6"/></svg>
+        </div>
+        <p class="feature-title">Hybrid RAG Retrieval</p>
+        <p class="feature-desc">Combines BM25 sparse retrieval with MedCPT neural reranking to surface the most clinically relevant evidence passages from a curated corpus.</p>
+        <span class="feature-chip">BM25 + MedCPT</span>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon">
+          <svg viewBox="0 0 24 24"><path d="M9 12l2 2 4-4"/><path d="M12 22C6.5 22 2 17.5 2 12S6.5 2 12 2s10 4.5 10 10-4.5 10-10 10z"/></svg>
+        </div>
+        <p class="feature-title">Cross-CoVe Verification</p>
+        <p class="feature-desc">Chain-of-Verification with three independent reviewer LLMs. A question only passes when a majority of reviewers validate it against the retrieved evidence.</p>
+        <span class="feature-chip">Majority Voting · 3 Reviewers</span>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon">
+          <svg viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+        </div>
+        <p class="feature-title">Multi-Provider LLM</p>
+        <p class="feature-desc">Plug in any provider — Gemini, Groq, Cerebras, OpenAI-compatible API, or Ollama for local inference. Generator and reviewers can each use different providers.</p>
+        <span class="feature-chip">Gemini · Groq · Cerebras · Ollama</span>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon">
+          <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        </div>
+        <p class="feature-title">Multi-Format Export</p>
+        <p class="feature-desc">Export your verified question set as raw JSON for downstream processing, a print-ready PDF exam sheet, or an editable DOCX document.</p>
+        <span class="feature-chip">JSON · PDF · DOCX</span>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon">
+          <svg viewBox="0 0 24 24"><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10 10-4.5 10-10S17.5 2 12 2z"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+        </div>
+        <p class="feature-title">Multilingual Output</p>
+        <p class="feature-desc">Generate questions natively in English or Indonesian. Switch display language on the history page without re-generating — output is stored in both languages.</p>
+        <span class="feature-chip">English · Indonesian</span>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon">
+          <svg viewBox="0 0 24 24"><path d="M3 3h18v18H3zM9 9h6M9 12h6M9 15h4"/></svg>
+        </div>
+        <p class="feature-title">Generation History</p>
+        <p class="feature-desc">Every run is stored locally with full provenance: evidence doc IDs, verification reports, per-attempt latency, and failure reasons for each question.</p>
+        <span class="feature-chip">Local Storage · Audit Log</span>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- ── Architecture ── -->
+<section class="section arch-section">
+  <div class="section-inner">
+    <div class="section-label">Architecture</div>
+    <h2 class="section-title">System overview</h2>
+    <p class="section-desc">Decoupled FastAPI backend with a pluggable retrieval and verification layer, served by a Next.js streaming frontend.</p>
+
+    <div class="arch-grid">
+      <div class="arch-flow">
+        <div class="arch-layer">
+          <div class="arch-layer-icon">
+            <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 9h6M9 12h6M9 15h4"/></svg>
+          </div>
+          <div>
+            <p class="arch-layer-name">Next.js Frontend</p>
+            <p class="arch-layer-detail">TypeScript · SSE stream · Export UI</p>
+          </div>
+        </div>
+        <div class="arch-arrow">↕</div>
+        <div class="arch-layer">
+          <div class="arch-layer-icon">
+            <svg viewBox="0 0 24 24"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+          </div>
+          <div>
+            <p class="arch-layer-name">FastAPI Backend</p>
+            <p class="arch-layer-detail">Python · WebSocket/SSE · Pipeline orchestration</p>
+          </div>
+        </div>
+        <div class="arch-arrow">↕</div>
+        <div class="arch-layer">
+          <div class="arch-layer-icon">
+            <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+          </div>
+          <div>
+            <p class="arch-layer-name">Retrieval Layer</p>
+            <p class="arch-layer-detail">BM25 Index + MedCPT Runtime + PubMed Web</p>
+          </div>
+        </div>
+        <div class="arch-arrow">↕</div>
+        <div class="arch-layer">
+          <div class="arch-layer-icon">
+            <svg viewBox="0 0 24 24"><path d="M9 12l2 2 4-4M12 22C6.5 22 2 17.5 2 12S6.5 2 12 2s10 4.5 10 10-4.5 10-10 10z"/></svg>
+          </div>
+          <div>
+            <p class="arch-layer-name">Verification Layer</p>
+            <p class="arch-layer-detail">CrossCoVeReviewer · ReviewerClient · gate.py</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="arch-desc-block">
+        <div class="arch-item">
+          <div class="arch-item-dot"></div>
+          <div>
+            <p class="arch-item-title">Streaming pipeline</p>
+            <p class="arch-item-desc">The backend streams question events over SSE as they are generated, so the UI updates in real time without waiting for the full batch to complete.</p>
+          </div>
+        </div>
+        <div class="arch-item">
+          <div class="arch-item-dot"></div>
+          <div>
+            <p class="arch-item-title">OK-only mode</p>
+            <p class="arch-item-desc">When enabled, the pipeline retries generation until a question passes Cross-CoVe, falls back to the question bank if max rounds are exhausted, and never surfaces a failed question to the user.</p>
+          </div>
+        </div>
+        <div class="arch-item">
+          <div class="arch-item-dot"></div>
+          <div>
+            <p class="arch-item-title">Pluggable LLM abstraction</p>
+            <p class="arch-item-desc">LLMClient routes to provider-specific adapters (Ollama, Groq, Cerebras, Gemini, OpenAI-compatible) with configurable fallback chains, so swapping providers requires only a .env change.</p>
+          </div>
+        </div>
+        <div class="arch-item">
+          <div class="arch-item-dot"></div>
+          <div>
+            <p class="arch-item-title">Latency audit logging</p>
+            <p class="arch-item-desc">Every run records per-attempt retrieval, LLM, and verification latency to JSONL and CSV for performance analysis.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── Tech Stack ── -->
+<section class="section">
+  <div class="section-inner">
+    <div class="section-label">Tech Stack</div>
+    <h2 class="section-title">Built with</h2>
+    <p class="section-desc" style="margin-bottom: 32px;">Open-source stack end to end.</p>
+
+    <div class="tech-grid">
+      <div class="tech-card">
+        <div class="tech-badge badge-blue">API</div>
+        <div>
+          <p class="tech-name">FastAPI</p>
+          <p class="tech-role">Backend · async API + SSE</p>
+        </div>
+      </div>
+      <div class="tech-card">
+        <div class="tech-badge badge-green">UI</div>
+        <div>
+          <p class="tech-name">Next.js 14</p>
+          <p class="tech-role">Frontend · App Router · TypeScript</p>
+        </div>
+      </div>
+      <div class="tech-card">
+        <div class="tech-badge badge-purple">ML</div>
+        <div>
+          <p class="tech-name">MedCPT</p>
+          <p class="tech-role">Dense retrieval · biomedical BERT</p>
+        </div>
+      </div>
+      <div class="tech-card">
+        <div class="tech-badge badge-orange">IDX</div>
+        <div>
+          <p class="tech-name">BM25</p>
+          <p class="tech-role">Sparse retrieval · keyword index</p>
+        </div>
+      </div>
+      <div class="tech-card">
+        <div class="tech-badge badge-teal">LLM</div>
+        <div>
+          <p class="tech-name">Gemini / Groq</p>
+          <p class="tech-role">Generation + verification LLMs</p>
+        </div>
+      </div>
+      <div class="tech-card">
+        <div class="tech-badge badge-rose">DATA</div>
+        <div>
+          <p class="tech-name">PubMed + HF Datasets</p>
+          <p class="tech-role">Medical corpus · evidence source</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── CTA Banner ── -->
+<section class="cta-banner">
+  <h2 class="cta-title">Ready to generate verified medical MCQs?</h2>
+  <p class="cta-desc">Clone the repo, set your .env, and run the pipeline locally in minutes.</p>
+  <div style="display:flex;justify-content:center;gap:12px;flex-wrap:wrap;">
+    <a class="btn-white" href="https://github.com/" target="_blank" rel="noopener">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.5 2 2 6.5 2 12c0 4.4 2.9 8.1 6.8 9.4.5.1.7-.2.7-.5v-1.8c-2.8.6-3.4-1.2-3.4-1.2-.5-1.2-1.1-1.5-1.1-1.5-.9-.6.1-.6.1-.6 1 .1 1.6 1 1.6 1 .9 1.5 2.4 1.1 3 .8.1-.7.4-1.1.7-1.4-2.2-.2-4.6-1.1-4.6-5 0-1.1.4-2.1 1-2.8-.1-.2-.4-1.3.1-2.6 0 0 .8-.3 2.7 1a9.4 9.4 0 0 1 4.9 0c1.9-1.3 2.7-1 2.7-1 .5 1.3.2 2.4.1 2.6.6.7 1 1.7 1 2.8 0 3.9-2.4 4.8-4.6 5 .4.3.7.9.7 1.8v2.7c0 .3.2.6.7.5A10 10 0 0 0 22 12c0-5.5-4.5-10-10-10Z"/></svg>
+      View Source on GitHub
+    </a>
+    <a class="btn-outline-white" href="#how-it-works">Learn More ↓</a>
+  </div>
+</section>
+
+<!-- ── Footer ── -->
+<footer class="footer">
+  <div class="footer-inner">
+    <div class="footer-brand">
+      <img src="logo.png" alt="MedQGen" style="height:44px;width:auto;" />
+      <p class="footer-copy" style="margin-left:4px;">© 2026 · Undergraduate Thesis Project</p>
+    </div>
+    <div class="footer-links">
+      <a class="footer-link" href="https://github.com/" target="_blank" rel="noopener">
+        <svg viewBox="0 0 24 24"><path d="M12 2C6.5 2 2 6.5 2 12c0 4.4 2.9 8.1 6.8 9.4.5.1.7-.2.7-.5v-1.8c-2.8.6-3.4-1.2-3.4-1.2-.5-1.2-1.1-1.5-1.1-1.5-.9-.6.1-.6.1-.6 1 .1 1.6 1 1.6 1 .9 1.5 2.4 1.1 3 .8.1-.7.4-1.1.7-1.4-2.2-.2-4.6-1.1-4.6-5 0-1.1.4-2.1 1-2.8-.1-.2-.4-1.3.1-2.6 0 0 .8-.3 2.7 1a9.4 9.4 0 0 1 4.9 0c1.9-1.3 2.7-1 2.7-1 .5 1.3.2 2.4.1 2.6.6.7 1 1.7 1 2.8 0 3.9-2.4 4.8-4.6 5 .4.3.7.9.7 1.8v2.7c0 .3.2.6.7.5A10 10 0 0 0 22 12c0-5.5-4.5-10-10-10Z"/></svg>
+        GitHub
+      </a>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>
