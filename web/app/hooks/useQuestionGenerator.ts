@@ -62,7 +62,7 @@ export const useQuestionGenerator = (): GeneratorState & {
     cancelledRef.current = false
 
     if (!payload.length) {
-      setError('Topic and competency are required.')
+      setError('At least one keyword is required.')
       return
     }
 

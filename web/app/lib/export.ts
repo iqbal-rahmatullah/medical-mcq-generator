@@ -5,6 +5,9 @@ import {
   resolveQuestionForDisplay,
 } from "./question-display"
 
+const EXPORT_TITLE = "AQG — Generated Questions"
+const EXPORT_FILENAME_PREFIX = "aqg_questions_export"
+
 function todayStr() {
   return new Date().toISOString().split("T")[0]
 }
@@ -52,7 +55,7 @@ export function exportJSON(questions: ApiQuestion[], lang: DisplayLanguage) {
   const blob = new Blob([JSON.stringify(payload, null, 2)], {
     type: "application/json",
   })
-  triggerDownload(blob, `medical_mcq_export_${todayStr()}.json`)
+  triggerDownload(blob, `${EXPORT_FILENAME_PREFIX}_${todayStr()}.json`)
 }
 
 export async function exportPDF(
@@ -104,7 +107,7 @@ export async function exportPDF(
   doc.setFontSize(16)
   doc.setFont("helvetica", "bold")
   doc.setTextColor(255, 255, 255)
-  doc.text("Medical MCQ — Generated Questions", MARGIN, 13)
+  doc.text(EXPORT_TITLE, MARGIN, 13)
   doc.setFontSize(9)
   doc.setFont("helvetica", "normal")
   doc.text(
@@ -195,7 +198,7 @@ export async function exportPDF(
     y += 2
   })
 
-  doc.save(`medical_mcq_export_${todayStr()}.pdf`)
+  doc.save(`${EXPORT_FILENAME_PREFIX}_${todayStr()}.pdf`)
 }
 
 export async function exportDOCX(
@@ -218,7 +221,7 @@ export async function exportDOCX(
   // Cover title
   children.push(
     new Paragraph({
-      text: "Medical MCQ — Generated Questions",
+      text: EXPORT_TITLE,
       heading: HeadingLevel.TITLE,
       spacing: { after: 200 },
     }),
@@ -397,5 +400,5 @@ export async function exportDOCX(
   })
 
   const blob = await Packer.toBlob(doc)
-  triggerDownload(blob, `medical_mcq_export_${todayStr()}.docx`)
+  triggerDownload(blob, `${EXPORT_FILENAME_PREFIX}_${todayStr()}.docx`)
 }

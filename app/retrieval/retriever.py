@@ -8,7 +8,6 @@ from typing import List, Optional
 from app.core.config import settings
 from app.corpus.models import Document
 from app.retrieval.bm25 import BM25Index
-from app.retrieval.medcpt_runtime import MedCPTRuntime
 from app.retrieval.query_builder import build_query
 
 LOGGER = logging.getLogger(__name__)
@@ -66,7 +65,7 @@ class Retriever:
     def __init__(
         self,
         bm25_index: BM25Index,
-        medcpt_runtime: Optional[MedCPTRuntime] = None,
+        medcpt_runtime=None,
         retrieval_mode: Optional[str] = None,
         bm25_candidates_top_n: Optional[int] = None,
         rerank_top_n: Optional[int] = None,

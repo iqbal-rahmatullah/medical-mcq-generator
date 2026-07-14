@@ -117,7 +117,7 @@ class LLMClient:
         if not raw_response or not raw_response.strip():
             return None
         prompt = (
-            "You are fixing JSON for a medical MCQ schema.\n"
+            "You are fixing JSON for a multiple-choice question schema.\n"
             "Task: Fix only answer_key values so each is a single letter: A, B, C, or D.\n"
             "If answer_key is a pattern like \"A|B|C|D\", infer the correct letter from the "
             "explanation or options; if unclear, use \"A\".\n"
@@ -302,7 +302,7 @@ class LLMClient:
             payload: dict[str, Any] = {
                 "model": model,
                 "messages": [
-                    {"role": "system", "content": "You are a helpful medical QA generator."},
+                    {"role": "system", "content": "You are a helpful multiple-choice question generator."},
                     {"role": "user", "content": prompt},
                 ],
                 "temperature": self._temperature,
@@ -384,7 +384,7 @@ class LLMClient:
         payload: dict[str, Any] = {
             "model": model,
             "messages": [
-                {"role": "system", "content": "You are a helpful medical QA generator."},
+                {"role": "system", "content": "You are a helpful multiple-choice question generator."},
                 {"role": "user", "content": prompt},
             ],
             "temperature": self._temperature,
@@ -401,10 +401,12 @@ class LLMClient:
         body = json.dumps(payload).encode("utf-8")
         headers = {
             "Content-Type": "application/json",
+            "Accept": "application/json",
+            "User-Agent": "AQG/0.1",
             "Authorization": f"Bearer {api_key}",
         }
         request = urllib.request.Request(
-            api_base, data=body, headers=headers, method="POST"
+            _build_openai_compatible_url(api_base), data=body, headers=headers, method="POST"
         )
 
         # Build SSL context using certifi CA bundle
@@ -418,7 +420,7 @@ class LLMClient:
             with urllib.request.urlopen(request, timeout=self._timeout_sec, context=ssl_ctx) as response:
                 raw = response.read().decode("utf-8")
         except urllib.error.HTTPError as exc:
-            LOGGER.error("LLM HTTP error: %s", exc)
+            LOGGER.error("LLM HTTP error: %s body=%s", exc, _read_http_error_body(exc))
             self._last_error_kind = _classify_error(exc)
             return None
         except urllib.error.URLError as exc:
@@ -486,7 +488,7 @@ class LLMClient:
             payload: dict[str, Any] = {
                 "model": model,
                 "messages": [
-                    {"role": "system", "content": "You are a helpful medical QA generator."},
+                    {"role": "system", "content": "You are a helpful multiple-choice question generator."},
                     {"role": "user", "content": prompt},
                 ],
                 "temperature": self._temperature,
@@ -525,7 +527,7 @@ class LLMClient:
         payload: dict[str, Any] = {
             "model": model,
             "messages": [
-                {"role": "system", "content": "You are a helpful medical QA generator."},
+                {"role": "system", "content": "You are a helpful multiple-choice question generator."},
                 {"role": "user", "content": prompt},
             ],
             "stream": False,
@@ -730,8 +732,22 @@ def _is_rate_limit_error(exc: Exception) -> bool:
     )
 
 
+def _read_http_error_body(exc: urllib.error.HTTPError) -> str:
+    try:
+        return exc.read().decode("utf-8", errors="replace")[:1000]
+    except Exception:
+        return ""
+
+
 def _build_ollama_url(api_base: str) -> str:
     base = api_base.strip().rstrip("/")
     if base.endswith("/api/chat") or base.endswith("/api/generate"):
         return base
     return f"{base}/api/chat"
+
+
+def _build_openai_compatible_url(api_base: str) -> str:
+    base = api_base.strip().rstrip("/")
+    if base.endswith("/chat/completions"):
+        return base
+    return f"{base}/chat/completions"

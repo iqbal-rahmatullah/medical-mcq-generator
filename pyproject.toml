@@ -1,7 +1,7 @@
 [project]
-name = "aqg-medis"
+name = "aqg"
 version = "0.1.0"
-description = "Kerangka FastAPI untuk sistem AQG medis"
+description = "Kerangka FastAPI untuk sistem AQG"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
@@ -13,6 +13,9 @@ dependencies = [
   "torch>=2.0",
   "transformers>=4.35",
   "uvicorn[standard]>=0.27",
+  "pypdf>=4.0",
+  "python-docx>=1.1",
+  "python-multipart>=0.0.9",
 ]
 
 [tool.setuptools.packages.find]

@@ -1,21 +1,16 @@
 """Pipeline orchestration: run_pipeline_stream and run_pipeline_batch."""
 from __future__ import annotations
 
-import json
 import logging
-import pickle
 import time
 import uuid
 from datetime import datetime
-from pathlib import Path
 from typing import Dict, Iterator, List, Optional
 
 from app.core.config import settings
-from app.corpus.loaders import load_pubmed_hf, load_textbooks_hf
-from app.corpus.store import DocumentStore
 from app.generation.llm_client import LLMClient
-from app.retrieval.bm25 import BM25Index
-from app.retrieval.medcpt_runtime import MedCPTRuntime
+from app.ingestion import knowledge_store as kb_store
+from app.retrieval.embedder import Embedder, StoredEmbeddingReranker
 from app.retrieval.retriever import Retriever
 from app.schemas.request import GenerateRequestItem
 from app.schemas.response import QuestionItem, QuestionStatus
@@ -34,12 +29,15 @@ from app.services._pipeline_utils import (
 )
 from app.services._question_generator import _generate_single_question
 from app.services._reviewers import _get_cross_cove_reviewer, _get_reviewer_client
-import hashlib  # noqa: E402 (used in _build_retriever_cache_fingerprint)
 
 LOGGER = logging.getLogger(__name__)
 
-_RETRIEVER: Optional[Retriever] = None
-_RETRIEVER_ERROR: Optional[str] = None
+# Per-kb_id retriever cache: each knowledge base has its own BM25 index +
+# stored embeddings on disk (built once at ingest time, see
+# app/ingestion/ingest_worker.py)
+_RETRIEVERS: Dict[str, Retriever] = {}
+_RETRIEVER_ERRORS: Dict[str, str] = {}
+_EMBEDDER: Optional[Embedder] = None
 _LLM_CLIENT: Optional[LLMClient] = None
 _MAX_DEDUP_ATTEMPTS = max(settings.LLM_DEDUP_ATTEMPTS, 1)
 
@@ -51,133 +49,42 @@ def _get_llm_client() -> LLMClient:
     return _LLM_CLIENT
 
 
-def _is_dev_environment() -> bool:
-    return (settings.environment or "").strip().lower() in {"local", "development", "dev"}
+def _get_embedder() -> Embedder:
+    global _EMBEDDER
+    if _EMBEDDER is None:
+        _EMBEDDER = Embedder()
+    return _EMBEDDER
 
 
-def _get_retriever_cache_path() -> Optional[Path]:
-    cache_path = (settings.RETRIEVER_CACHE_PATH or "").strip()
-    return Path(cache_path).expanduser() if cache_path else None
-
-
-def _build_retriever_cache_fingerprint() -> str:
-    payload = {
-        "corpus_schema_version": 2,
-        "pubmed_dataset": settings.CORPUS_PUBMED_HF_DATASET,
-        "textbooks_dataset": settings.CORPUS_TEXTBOOKS_HF_DATASET,
-        "pubmed_max_docs": settings.CORPUS_PUBMED_MAX_DOCS,
-        "textbooks_max_docs": settings.CORPUS_TEXTBOOKS_MAX_DOCS,
-        "hf_local_only": settings.CORPUS_HF_LOCAL_ONLY,
-        "hf_streaming": settings.CORPUS_HF_STREAMING,
-        "bm25_k1": 1.5,
-        "bm25_b": 0.75,
-    }
-    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
-
-
-def _load_cached_bm25_index() -> Optional[BM25Index]:
-    if not _is_dev_environment():
+def _get_retriever(kb_id: str) -> Optional[Retriever]:
+    if kb_id in _RETRIEVERS:
+        return _RETRIEVERS[kb_id]
+    if kb_id in _RETRIEVER_ERRORS:
         return None
-    cache_path = _get_retriever_cache_path()
-    if cache_path is None or not cache_path.exists():
+
+    try:
+        bm25_index, doc_embeddings = kb_store.load_kb_index(kb_id)
+    except Exception as exc:
+        _RETRIEVER_ERRORS[kb_id] = str(exc)
+        LOGGER.exception("Failed to load KB index for kb_id=%s: %s", kb_id, exc)
         return None
-    try:
-        with cache_path.open("rb") as handle:
-            payload = pickle.load(handle)
-        if not isinstance(payload, dict):
-            return None
-        if payload.get("fingerprint") != _build_retriever_cache_fingerprint():
-            return None
-        index = payload.get("bm25_index")
-        if isinstance(index, BM25Index):
-            LOGGER.info("Loaded retriever cache from %s", cache_path)
-            return index
-    except Exception as exc:
-        LOGGER.warning("Failed to load retriever cache: %s", exc)
-    return None
+
+    reranker = None
+    if settings.RETRIEVAL_MODE == "hybrid_rerank" and doc_embeddings:
+        try:
+            reranker = StoredEmbeddingReranker(_get_embedder(), doc_embeddings)
+        except Exception as exc:
+            LOGGER.exception("Failed to init embedding reranker for kb_id=%s: %s", kb_id, exc)
+
+    retriever = Retriever(bm25_index, medcpt_runtime=reranker)
+    _RETRIEVERS[kb_id] = retriever
+    return retriever
 
 
-def _write_cached_bm25_index(index: BM25Index) -> None:
-    if not _is_dev_environment():
-        return
-    cache_path = _get_retriever_cache_path()
-    if cache_path is None:
-        return
-    try:
-        cache_path.parent.mkdir(parents=True, exist_ok=True)
-        payload = {"fingerprint": _build_retriever_cache_fingerprint(), "bm25_index": index}
-        with cache_path.open("wb") as handle:
-            pickle.dump(payload, handle, protocol=pickle.HIGHEST_PROTOCOL)
-        LOGGER.info("Saved retriever cache to %s", cache_path)
-    except Exception as exc:
-        LOGGER.warning("Failed to write retriever cache: %s", exc)
-
-
-def _load_corpus() -> DocumentStore:
-    store = DocumentStore()
-    pubmed_limit = max(settings.CORPUS_PUBMED_MAX_DOCS, 0)
-    textbook_limit = max(settings.CORPUS_TEXTBOOKS_MAX_DOCS, 0)
-    pubmed_count = 0
-    textbook_count = 0
-
-    try:
-        for doc in load_pubmed_hf(
-            settings.CORPUS_PUBMED_HF_DATASET,
-            local_files_only=settings.CORPUS_HF_LOCAL_ONLY,
-            streaming=settings.CORPUS_HF_STREAMING,
-        ):
-            if store.add(doc):
-                pubmed_count += 1
-            if pubmed_limit and pubmed_count >= pubmed_limit:
-                break
-    except Exception as exc:
-        LOGGER.warning("Pubmed HF load failed: %s", exc)
-
-    try:
-        for doc in load_textbooks_hf(
-            settings.CORPUS_TEXTBOOKS_HF_DATASET,
-            local_files_only=settings.CORPUS_HF_LOCAL_ONLY,
-            streaming=settings.CORPUS_HF_STREAMING,
-        ):
-            if store.add(doc):
-                textbook_count += 1
-            if textbook_limit and textbook_count >= textbook_limit:
-                break
-    except Exception as exc:
-        LOGGER.warning("Textbooks HF load failed: %s", exc)
-
-    return store
-
-
-def _get_retriever() -> Optional[Retriever]:
-    global _RETRIEVER, _RETRIEVER_ERROR
-    if _RETRIEVER is not None or _RETRIEVER_ERROR:
-        return _RETRIEVER
-
-    try:
-        index = _load_cached_bm25_index()
-        if index is None:
-            store = _load_corpus()
-            if len(store) == 0:
-                _RETRIEVER_ERROR = "corpus_empty"
-                LOGGER.error("Corpus is empty; check HF dataset cache or config")
-                return None
-            index = BM25Index.build(store.iter_docs())
-            _write_cached_bm25_index(index)
-
-        medcpt_runtime = None
-        if settings.RETRIEVAL_MODE == "hybrid_rerank":
-            try:
-                medcpt_runtime = MedCPTRuntime()
-            except Exception as exc:
-                LOGGER.exception("Failed to init MedCPT runtime: %s", exc)
-
-        _RETRIEVER = Retriever(index, medcpt_runtime=medcpt_runtime)
-        return _RETRIEVER
-    except Exception as exc:
-        _RETRIEVER_ERROR = f"retriever_init_failed: {exc}"
-        LOGGER.exception("Failed to init retriever: %s", exc)
-        return None
+def invalidate_retriever_cache(kb_id: str) -> None:
+    """Drop any cached retriever for kb_id (called after re-ingest/edit)."""
+    _RETRIEVERS.pop(kb_id, None)
+    _RETRIEVER_ERRORS.pop(kb_id, None)
 
 
 def build_failure_batch(
@@ -196,7 +103,7 @@ def run_pipeline_stream(
     payload: List[GenerateRequestItem],
     include_failed: bool = True,
 ) -> Iterator[Dict[str, object]]:
-    retriever = _get_retriever()
+    retriever = _get_retriever(payload[0].kb_id) if payload else None
     llm_client = _get_llm_client()
     reviewer_client = _get_reviewer_client()
     cross_cove_reviewer = _get_cross_cove_reviewer()

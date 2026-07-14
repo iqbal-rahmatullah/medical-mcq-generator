@@ -4,7 +4,7 @@ export default function Footer() {
   return (
     <footer className='footer'>
       <div className='footer-inner'>
-        <p className='footer-note'>(c) 2026 MedQGen</p>
+        <p className='footer-note'>(c) 2026 AQG</p>
         <Link className='footer-link' href='https://github.com/'>
           <span className='footer-link-icon' aria-hidden='true'>
             <svg viewBox='0 0 24 24'>

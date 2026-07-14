@@ -1,413 +1,395 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
+import type { MouseEvent } from "react"
+import { useRouter } from "next/navigation"
 
 import FormField from "../components/FormField"
 import Footer from "../components/Footer"
 import Navbar from "../components/Navbar"
-import QuestionCard from "../components/QuestionCard"
 import SectionCard from "../components/SectionCard"
-import ToggleSwitch from "../components/ToggleSwitch"
-import { useQuestionGenerator } from "./hooks/useQuestionGenerator"
-import { COMPETENCY_OPTIONS } from "./lib/constants"
-import { exportDOCX, exportJSON, exportPDF } from "./lib/export"
-import { buildGeneratePayload } from "./lib/generate"
 import {
-  hasIndonesianTranslationCoverage,
-  QUESTION_OPTION_KEYS,
-  resolveQuestionForDisplay,
-} from "./lib/question-display"
-import type { TopicEntry } from "./lib/types"
+  addKnowledgeFiles,
+  createKnowledge,
+  deleteKnowledge,
+  listKnowledge,
+  removeKnowledgeFile,
+  renameKnowledge,
+} from "./lib/knowledge"
+import type { KnowledgeManifest } from "./lib/knowledge"
+
+const STATUS_LABEL: Record<KnowledgeManifest["status"], string> = {
+  processing: "Embedding Processing",
+  ready: "Ready",
+  failed: "Failed",
+}
 
 export default function HomePage() {
-  const [topics, setTopics] = useState<TopicEntry[]>([
-    {
-      id: "topic-1",
-      topic: "Cancer",
-      competency: "Diagnosis",
-      n_questions: 5,
-    },
-  ])
-  const { results, loading, error, progress, failedCount, generate, cancel } =
-    useQuestionGenerator()
-  const [showAnswers, setShowAnswers] = useState(true)
-  const [displayLanguage, setDisplayLanguage] = useState<"en" | "id">("en")
-  const [exportOpen, setExportOpen] = useState(false)
-  const exportRef = useRef<HTMLDivElement>(null)
+  const router = useRouter()
+  const [kbs, setKbs] = useState<KnowledgeManifest[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState("")
 
-  const questionCards = useMemo(() => {
-    const rankedQuestions = results
-      .map((question, sourceIndex) => ({
-        question,
-        sourceIndex,
-        isCovered:
-          displayLanguage !== "id" ||
-          hasIndonesianTranslationCoverage(question),
-      }))
-      .sort((left, right) => {
-        if (left.isCovered === right.isCovered) {
-          return left.sourceIndex - right.sourceIndex
-        }
-        return left.isCovered ? -1 : 1
-      })
+  const [createOpen, setCreateOpen] = useState(false)
+  const [createTitle, setCreateTitle] = useState("")
+  const [createFiles, setCreateFiles] = useState<File[]>([])
+  const [creating, setCreating] = useState(false)
+  const [createError, setCreateError] = useState("")
 
-    return rankedQuestions.map(({ question, sourceIndex }, index) => {
-      const resolvedQuestion = resolveQuestionForDisplay(
-        question,
-        displayLanguage,
+  const [editingKb, setEditingKb] = useState<KnowledgeManifest | null>(null)
+  const [editTitle, setEditTitle] = useState("")
+  const [editAddFiles, setEditAddFiles] = useState<File[]>([])
+  const [editSaving, setEditSaving] = useState(false)
+  const [editError, setEditError] = useState("")
+
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  const refresh = async () => {
+    try {
+      const data = await listKnowledge()
+      setKbs(data)
+      setError("")
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Failed to load knowledge bases.",
       )
-
-      const evidenceItems = resolvedQuestion.evidence
-        .map((item) => {
-          const docId = item.doc_id || ""
-          const source = item.source || ""
-          const span = item.span_text || ""
-          return {
-            docId,
-            source,
-            span,
-          }
-        })
-        .filter((item) => item.docId || item.span)
-
-      return {
-        sourceIndex,
-        index: index + 1,
-        prompt: resolvedQuestion.stem || "Question text unavailable.",
-        options: QUESTION_OPTION_KEYS.map((key) => ({
-          key,
-          text: resolvedQuestion.options[key] || "-",
-        })),
-        selectedKey: showAnswers ? resolvedQuestion.answer_key : undefined,
-        explanation: resolvedQuestion.explanation || "",
-        evidence: evidenceItems.length
-          ? {
-              label: "Source Evidence / RAG Context",
-              items: evidenceItems,
-            }
-          : undefined,
-        status: resolvedQuestion.status,
-      }
-    })
-  }, [results, showAnswers, displayLanguage])
-
-  const handleTopicChange = (
-    id: string,
-    field: keyof TopicEntry,
-    value: string | number,
-  ) => {
-    setTopics((prev) =>
-      prev.map((topic) =>
-        topic.id === id ? { ...topic, [field]: value } : topic,
-      ),
-    )
-  }
-
-  const handleAddTopic = () => {
-    setTopics((prev) => [
-      ...prev,
-      {
-        id: `topic-${Date.now()}`,
-        topic: "",
-        competency: "Diagnosis",
-        n_questions: 5,
-      },
-    ])
-  }
-
-  const handleRemoveTopic = (id: string) => {
-    setTopics((prev) => prev.filter((topic) => topic.id !== id))
-  }
-
-  const handleGenerate = () => {
-    const payload = buildGeneratePayload(topics)
-    generate(payload)
-  }
-
-  const handleExport = (format: "json" | "pdf" | "docx") => {
-    setExportOpen(false)
-    if (format === "json") exportJSON(results, displayLanguage)
-    else if (format === "pdf") exportPDF(results, displayLanguage)
-    else exportDOCX(results, displayLanguage)
+    } finally {
+      setLoading(false)
+    }
   }
 
   useEffect(() => {
-    if (!exportOpen) return
-    const handler = (e: MouseEvent) => {
-      if (exportRef.current && !exportRef.current.contains(e.target as Node)) {
-        setExportOpen(false)
-      }
+    refresh()
+  }, [])
+
+  useEffect(() => {
+    const hasProcessing = kbs.some((kb) => kb.status === "processing")
+    if (pollRef.current) {
+      clearInterval(pollRef.current)
+      pollRef.current = null
     }
-    document.addEventListener("mousedown", handler)
-    return () => document.removeEventListener("mousedown", handler)
-  }, [exportOpen])
+    if (hasProcessing) {
+      pollRef.current = setInterval(refresh, 2000)
+    }
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kbs])
+
+  const handleCardClick = (kb: KnowledgeManifest) => {
+    if (kb.status !== "ready") return
+    router.push(`/knowledge/${kb.id}`)
+  }
+
+  const openCreate = () => {
+    setCreateTitle("")
+    setCreateFiles([])
+    setCreateError("")
+    setCreateOpen(true)
+  }
+
+  const submitCreate = async () => {
+    if (!createTitle.trim()) {
+      setCreateError("Title is required.")
+      return
+    }
+    if (!createFiles.length) {
+      setCreateError("Select at least one file.")
+      return
+    }
+    setCreating(true)
+    setCreateError("")
+    try {
+      await createKnowledge(createTitle.trim(), createFiles)
+      setCreateOpen(false)
+      await refresh()
+    } catch (err) {
+      setCreateError(
+        err instanceof Error ? err.message : "Failed to create knowledge base.",
+      )
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  const openEdit = (kb: KnowledgeManifest, event: MouseEvent) => {
+    event.stopPropagation()
+    setEditingKb(kb)
+    setEditTitle(kb.title)
+    setEditAddFiles([])
+    setEditError("")
+  }
+
+  const closeEdit = () => setEditingKb(null)
+
+  const submitRename = async () => {
+    if (!editingKb) return
+    if (!editTitle.trim()) {
+      setEditError("Title is required.")
+      return
+    }
+    setEditSaving(true)
+    setEditError("")
+    try {
+      const updated = await renameKnowledge(editingKb.id, editTitle.trim())
+      setEditingKb(updated)
+      await refresh()
+    } catch (err) {
+      setEditError(err instanceof Error ? err.message : "Failed to rename.")
+    } finally {
+      setEditSaving(false)
+    }
+  }
+
+  const submitAddFiles = async () => {
+    if (!editingKb || !editAddFiles.length) return
+    setEditSaving(true)
+    setEditError("")
+    try {
+      const updated = await addKnowledgeFiles(editingKb.id, editAddFiles)
+      setEditingKb(updated)
+      setEditAddFiles([])
+      await refresh()
+    } catch (err) {
+      setEditError(err instanceof Error ? err.message : "Failed to add files.")
+    } finally {
+      setEditSaving(false)
+    }
+  }
+
+  const handleRemoveFile = async (filename: string) => {
+    if (!editingKb) return
+    setEditSaving(true)
+    setEditError("")
+    try {
+      const updated = await removeKnowledgeFile(editingKb.id, filename)
+      setEditingKb(updated)
+      await refresh()
+    } catch (err) {
+      setEditError(
+        err instanceof Error ? err.message : "Failed to remove file.",
+      )
+    } finally {
+      setEditSaving(false)
+    }
+  }
+
+  const handleDelete = async (kb: KnowledgeManifest, event: MouseEvent) => {
+    event.stopPropagation()
+    if (
+      !window.confirm(
+        `Delete knowledge base "${kb.title}"? This cannot be undone.`,
+      )
+    ) {
+      return
+    }
+    try {
+      await deleteKnowledge(kb.id)
+      await refresh()
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Failed to delete knowledge base.",
+      )
+    }
+  }
 
   return (
     <div className='app-shell'>
       <Navbar />
       <main className='page-body'>
         <div className='container'>
-          <div className='content-grid'>
-            <SectionCard title='Exam Configuration'>
-              <div className='config-stack'>
-                {topics.map((topic, index) => (
-                  <div className='config-card' key={topic.id}>
-                    <div className='config-header'>
-                      <p className='config-title'>Topic {index + 1}</p>
-                      {topics.length > 1 ? (
+          <SectionCard title='Knowledge Bases'>
+            {error ? <p className='form-error'>{error}</p> : null}
+            {loading ? (
+              <p className='form-muted'>Loading...</p>
+            ) : (
+              <div className='kb-grid'>
+                {kbs.map((kb) => (
+                  <div
+                    key={kb.id}
+                    className={`kb-card${kb.status !== "ready" ? " is-disabled" : ""}`}
+                    onClick={() => handleCardClick(kb)}
+                  >
+                    <div className='kb-card-header'>
+                      <span className='kb-card-title'>{kb.title}</span>
+                      <div className='kb-card-actions'>
                         <button
                           type='button'
-                          className='remove-button'
-                          onClick={() => handleRemoveTopic(topic.id)}
+                          className='kb-card-icon-btn'
+                          onClick={(e) => openEdit(kb, e)}
+                          aria-label='Edit'
                         >
-                          Remove
+                          Edit
                         </button>
-                      ) : null}
+                        <button
+                          type='button'
+                          className='kb-card-icon-btn'
+                          onClick={(e) => handleDelete(kb, e)}
+                          aria-label='Delete'
+                        >
+                          Delete
+                        </button>
+                      </div>
                     </div>
-                    <FormField label='Topic'>
-                      <input
-                        className='text-input'
-                        value={topic.topic}
-                        onChange={(event) =>
-                          handleTopicChange(
-                            topic.id,
-                            "topic",
-                            event.target.value,
-                          )
-                        }
-                        placeholder='Cardiology'
-                      />
-                    </FormField>
-                    <FormField label='Competency'>
-                      <select
-                        className='text-input'
-                        value={topic.competency}
-                        onChange={(event) =>
-                          handleTopicChange(
-                            topic.id,
-                            "competency",
-                            event.target.value,
-                          )
-                        }
-                      >
-                        {COMPETENCY_OPTIONS.map((option) => (
-                          <option key={option} value={option}>
-                            {option}
-                          </option>
-                        ))}
-                      </select>
-                    </FormField>
-                    <FormField label='Question Count'>
-                      <input
-                        className='text-input'
-                        type='number'
-                        min={1}
-                        value={topic.n_questions}
-                        onChange={(event) =>
-                          handleTopicChange(
-                            topic.id,
-                            "n_questions",
-                            Math.max(
-                              1,
-                              Number.parseInt(event.target.value, 10) || 1,
-                            ),
-                          )
-                        }
-                      />
-                    </FormField>
+                    <span className={`kb-status-badge ${kb.status}`}>
+                      {STATUS_LABEL[kb.status]}
+                    </span>
+                    <ul className='kb-file-list'>
+                      {kb.files.map((f) => (
+                        <li key={f}>{f}</li>
+                      ))}
+                    </ul>
+                    {kb.status === "failed" && kb.error ? (
+                      <p className='form-error'>{kb.error}</p>
+                    ) : null}
                   </div>
                 ))}
-              </div>
 
-              <button
-                type='button'
-                className='ghost-button'
-                onClick={handleAddTopic}
-              >
-                + Add Another Topic
-              </button>
-
-              <button
-                type='button'
-                className='primary-button'
-                onClick={handleGenerate}
-                disabled={loading}
-              >
-                {loading ? "Generating..." : "Generate Questions"}
-              </button>
-              {loading ? (
                 <button
                   type='button'
-                  className='secondary-button'
-                  onClick={cancel}
+                  className='kb-create-card'
+                  onClick={openCreate}
                 >
-                  Stop Generation
+                  + Create Knowledge
                 </button>
-              ) : null}
-
-              {error ? <p className='form-error'>{error}</p> : null}
-              {loading && progress ? (
-                <p className='form-muted'>
-                  Generating {progress.completed} of {progress.total}{" "}
-                  questions...
-                  {failedCount ? ` ${failedCount} failed validation.` : ""}
-                </p>
-              ) : null}
-            </SectionCard>
-
-            <SectionCard
-              title='Generated Questions'
-              action={
-                <div className='section-actions'>
-                  <div
-                    className='language-selector'
-                    role='group'
-                    aria-label='Display language'
-                  >
-                    <label
-                      className={`lang-radio-label${displayLanguage === "en" ? " active" : ""}`}
-                    >
-                      <input
-                        type='radio'
-                        name='display-language'
-                        value='en'
-                        checked={displayLanguage === "en"}
-                        onChange={() => setDisplayLanguage("en")}
-                        className='lang-radio-input'
-                      />
-                      🇬🇧 EN
-                    </label>
-                    <label
-                      className={`lang-radio-label${displayLanguage === "id" ? " active" : ""}`}
-                    >
-                      <input
-                        type='radio'
-                        name='display-language'
-                        value='id'
-                        checked={displayLanguage === "id"}
-                        onChange={() => setDisplayLanguage("id")}
-                        className='lang-radio-input'
-                      />
-                      🇮🇩 ID
-                    </label>
-                  </div>
-                  <ToggleSwitch
-                    label='Show correct answers'
-                    checked={showAnswers}
-                    onChange={setShowAnswers}
-                  />
-                  {results.length > 0 && !loading ? (
-                    <div className='export-dropdown' ref={exportRef}>
-                      <button
-                        id='export-btn'
-                        type='button'
-                        className='export-trigger'
-                        onClick={() => setExportOpen((o) => !o)}
-                        aria-haspopup='true'
-                        aria-expanded={exportOpen}
-                      >
-                        <span>⬇</span> Export
-                      </button>
-                      {exportOpen ? (
-                        <div className='export-menu' role='menu'>
-                          <button
-                            id='export-json-btn'
-                            type='button'
-                            className='export-menu-item'
-                            role='menuitem'
-                            onClick={() => handleExport("json")}
-                          >
-                            <span className='export-icon'>{}</span>
-                            <span>
-                              <strong>JSON</strong>
-                              <small>Raw data</small>
-                            </span>
-                          </button>
-                          <button
-                            id='export-pdf-btn'
-                            type='button'
-                            className='export-menu-item'
-                            role='menuitem'
-                            onClick={() => handleExport("pdf")}
-                          >
-                            <span className='export-icon'>📕</span>
-                            <span>
-                              <strong>PDF</strong>
-                              <small>Print-ready exam</small>
-                            </span>
-                          </button>
-                          <button
-                            id='export-docx-btn'
-                            type='button'
-                            className='export-menu-item'
-                            role='menuitem'
-                            onClick={() => handleExport("docx")}
-                          >
-                            <span className='export-icon'>📘</span>
-                            <span>
-                              <strong>DOCX</strong>
-                              <small>Editable document</small>
-                            </span>
-                          </button>
-                        </div>
-                      ) : null}
-                    </div>
-                  ) : null}
-                </div>
-              }
-            >
-              {results.length ? (
-                <div className='question-list'>
-                  {questionCards.map((question) => (
-                    <QuestionCard
-                      key={`question-${question.sourceIndex}`}
-                      index={question.index}
-                      prompt={question.prompt}
-                      options={question.options}
-                      selectedKey={question.selectedKey}
-                      explanation={question.explanation}
-                      evidence={question.evidence}
-                      status={question.status}
-                    />
-                  ))}
-                </div>
-              ) : null}
-
-              {loading ? (
-                <div className='empty-state is-loading'>
-                  <div className='loading-orbit' aria-hidden='true'>
-                    <span className='loading-ring'></span>
-                    <span className='loading-ring secondary'></span>
-                    <span className='loading-core'></span>
-                  </div>
-                  <p className='empty-title'>Generating questions...</p>
-                  <p className='empty-desc'>
-                    We are streaming results as they are ready.
-                  </p>
-                  <div className='loading-bar' aria-hidden='true'></div>
-                </div>
-              ) : null}
-
-              {!loading && !results.length ? (
-                <div className='empty-state'>
-                  <div className='empty-icon' aria-hidden='true'>
-                    <svg viewBox='0 0 48 48'>
-                      <circle cx='20' cy='22' r='8' />
-                      <path d='M26 28l7 7' />
-                      <rect x='9' y='10' width='30' height='28' rx='8' />
-                    </svg>
-                  </div>
-                  <p className='empty-title'>No questions yet.</p>
-                  <p className='empty-desc'>
-                    Add a topic on the left and click Generate Questions.
-                  </p>
-                </div>
-              ) : null}
-            </SectionCard>
-          </div>
+              </div>
+            )}
+          </SectionCard>
         </div>
       </main>
       <Footer />
+
+      {createOpen ? (
+        <div
+          className='modal-overlay'
+          onClick={() => !creating && setCreateOpen(false)}
+        >
+          <div className='modal-panel' onClick={(e) => e.stopPropagation()}>
+            <p className='modal-title'>Create Knowledge Base</p>
+            <FormField label='Title'>
+              <input
+                className='text-input'
+                value={createTitle}
+                onChange={(e) => setCreateTitle(e.target.value)}
+                placeholder='e.g. Biology Chapter 1-3'
+              />
+            </FormField>
+            <FormField
+              label='Files'
+              helper='PDF, DOCX, TXT, or MD. You can select more than one.'
+            >
+              <input
+                type='file'
+                multiple
+                accept='.pdf,.docx,.txt,.md'
+                onChange={(e) =>
+                  setCreateFiles(Array.from(e.target.files || []))
+                }
+              />
+            </FormField>
+            {createFiles.length ? (
+              <p className='form-muted'>
+                {createFiles.length} file(s) selected
+              </p>
+            ) : null}
+            {createError ? <p className='form-error'>{createError}</p> : null}
+            <div className='modal-actions'>
+              <button
+                type='button'
+                className='secondary-button'
+                onClick={() => setCreateOpen(false)}
+                disabled={creating}
+              >
+                Cancel
+              </button>
+              <button
+                type='button'
+                className='primary-button'
+                onClick={submitCreate}
+                disabled={creating}
+              >
+                {creating ? "Creating..." : "Create"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {editingKb ? (
+        <div className='modal-overlay' onClick={closeEdit}>
+          <div className='modal-panel' onClick={(e) => e.stopPropagation()}>
+            <p className='modal-title'>Edit Knowledge Base</p>
+            <FormField label='Title'>
+              <input
+                className='text-input'
+                value={editTitle}
+                onChange={(e) => setEditTitle(e.target.value)}
+              />
+            </FormField>
+            <button
+              type='button'
+              className='secondary-button'
+              onClick={submitRename}
+              disabled={editSaving}
+            >
+              Save Title
+            </button>
+
+            <div>
+              <p className='form-label'>Files</p>
+              {editingKb.files.map((f) => (
+                <div className='modal-file-row' key={f}>
+                  <span>{f}</span>
+                  <button
+                    type='button'
+                    className='kb-card-icon-btn'
+                    onClick={() => handleRemoveFile(f)}
+                    disabled={editSaving}
+                  >
+                    Remove
+                  </button>
+                </div>
+              ))}
+            </div>
+
+            <FormField label='Add files'>
+              <input
+                type='file'
+                multiple
+                accept='.pdf,.docx,.txt,.md'
+                onChange={(e) =>
+                  setEditAddFiles(Array.from(e.target.files || []))
+                }
+              />
+            </FormField>
+            {editAddFiles.length ? (
+              <button
+                type='button'
+                className='secondary-button'
+                onClick={submitAddFiles}
+                disabled={editSaving}
+              >
+                {editSaving
+                  ? "Uploading..."
+                  : `Add ${editAddFiles.length} file(s)`}
+              </button>
+            ) : null}
+
+            {editError ? <p className='form-error'>{editError}</p> : null}
+
+            <div className='modal-actions'>
+              <button
+                type='button'
+                className='primary-button'
+                onClick={closeEdit}
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   )
 }

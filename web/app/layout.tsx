@@ -5,8 +5,8 @@ import type { ReactNode } from "react"
 import "./globals.css"
 
 export const metadata: Metadata = {
-  title: "AQG Medical",
-  description: "Generate medical questions easily with AQG Medical.",
+  title: "AQG",
+  description: "Generate questions easily with AQG.",
 }
 
 const manrope = Manrope({

@@ -8,7 +8,7 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    project_name: str = "AQG Medis"
+    project_name: str = "AQG"
     environment: str = "local"
     RETRIEVER_CACHE_PATH: str = ".cache/retriever_cache.pkl"
     RETRIEVAL_MODE: str = "bm25_only"
@@ -47,9 +47,17 @@ class Settings(BaseSettings):
     EVIDENCE_MAX_CHARS_PER_DOC: int = 800
     EVIDENCE_MAX_TOTAL_CHARS: int = 4000
     QUESTION_BANK_PATH: str = "app/logging/question_bank.jsonl"
-    QUESTION_BANK_FALLBACK: bool = True
-    QUESTION_BANK_WRITE_OK: bool = True
+    QUESTION_BANK_FALLBACK: bool = False
+    QUESTION_BANK_WRITE_OK: bool = False
     QUESTION_BANK_ALLOW_ANY_TOPIC: bool = False
+    CLINICAL_VIGNETTE_CHECK_ENABLED: bool = False
+
+    # Knowledge base ingestion (domain-agnostic, local-only)
+    KNOWLEDGE_DIR: str = "data/knowledge"
+    EMBED_MODEL: str = "intfloat/multilingual-e5-small"
+    CHUNK_SIZE: int = 1000
+    CHUNK_OVERLAP: int = 150
+    REVIEWER_ENABLED: bool = True
     REVIEWER_PROVIDER: str = ""
     REVIEWER_API_KEY: str = ""
     REVIEWER_API_BASE: str = ""

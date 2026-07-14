@@ -104,9 +104,9 @@ export default function HistoryPage() {
                             className='history-topic'
                             key={`${entry.id}-${index}`}
                           >
-                            <p className='history-topic-title'>{item.topic}</p>
+                            <p className='history-topic-title'>{item.keyword}</p>
                             <p className='history-topic-meta'>
-                              {item.competency} · {item.n_questions} questions
+                              {item.n_questions} questions
                             </p>
                           </div>
                         ))}

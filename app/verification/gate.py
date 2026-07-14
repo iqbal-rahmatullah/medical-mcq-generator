@@ -380,11 +380,11 @@ def _build_review_prompt(question: QuestionItem, evidence_text: str) -> str:
         ]
     )
     return (
-        "You are verifying whether a medical MCQ is answerable from evidence AND well-constructed.\n"
+        "You are verifying whether a multiple-choice question is answerable from evidence AND well-constructed.\n"
         "Reply with a single token: A, B, C, D, or INSUFFICIENT.\n"
         "Reply INSUFFICIENT if:\n"
         "  - The correct answer cannot be determined from the evidence\n"
-        "  - The distractors (wrong options) are implausible or not medically relevant\n"
+        "  - The distractors (wrong options) are implausible or not relevant to the topic\n"
         "  - The question tests only trivial recall rather than clinical reasoning\n"
         "Do not add extra text.\n\n"
         f"Question: {question.stem}\n"
@@ -395,7 +395,7 @@ def _build_review_prompt(question: QuestionItem, evidence_text: str) -> str:
 
 def _build_topic_relevance_prompt(topic: str, stem: str) -> str:
     return (
-        "You are checking whether a medical exam question is DIRECTLY about the given topic.\n"
+        "You are checking whether an exam question is DIRECTLY about the given topic.\n"
         "The question must specifically test knowledge of the topic, not merely mention it.\n"
         "Reply with a single token: YES or NO.\n"
         "Do not add extra text.\n\n"
@@ -455,7 +455,13 @@ def _check_clinical_vignette(
     question: QuestionItem,
     notes: List[str],
 ) -> List[str]:
-    """Block definitional/trivial stems that are not clinical vignettes."""
+    """Block definitional/trivial stems that are not clinical vignettes.
+
+    Medical-domain-specific check; off by default for domain-agnostic
+    knowledge bases (CLINICAL_VIGNETTE_CHECK_ENABLED).
+    """
+    if not settings.CLINICAL_VIGNETTE_CHECK_ENABLED:
+        return []
     if question.status != "OK":
         return []
     stem = question.stem.strip()

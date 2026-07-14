@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>MedQGen — AI-Powered Medical MCQ Generator</title>
-  <meta name="description" content="Generate clinically accurate medical multiple-choice questions using RAG retrieval, Cross-CoVe verification, and multi-provider LLMs." />
+  <title>AQG — AI-Powered Question Generator</title>
+  <meta name="description" content="Generate evidence-grounded multiple-choice questions using RAG retrieval, Cross-CoVe verification, and multi-provider LLMs." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Sora:wght@600;700;800&display=swap" rel="stylesheet" />
@@ -506,7 +506,7 @@
 <nav class="navbar">
   <div class="navbar-inner">
     <a class="brand" href="#">
-      <img src="logo.png" alt="MedQGen" class="brand-logo" />
+      <img src="logo.png" alt="AQG" class="brand-logo" />
     </a>
     <div class="nav-links">
       <a class="nav-pill ghost" href="https://github.com/" target="_blank" rel="noopener">
@@ -524,9 +524,9 @@
     <span class="hero-badge-dot"></span>
     Research Project · Undergraduate Thesis
   </div>
-  <h1>AI-Powered Medical <span>MCQ Generator</span></h1>
+  <h1>AI-Powered <span>Question Generator</span></h1>
   <p class="hero-desc">
-    Generate clinically accurate multiple-choice questions grounded in evidence from PubMed and medical textbooks, verified by three AI reviewers using Cross-CoVe.
+    Generate accurate multiple-choice questions grounded in evidence from your knowledge base, verified by three AI reviewers using Cross-CoVe.
   </p>
   <div class="hero-actions">
     <a class="btn-primary" href="#how-it-works">
@@ -578,7 +578,7 @@
         <div class="step-num">1</div>
         <div class="step-body">
           <p class="step-title">Configure topic &amp; competency</p>
-          <p class="step-desc">Define the medical topic (e.g. "Hypertension") and learning competency. Set how many questions to generate per topic.</p>
+          <p class="step-desc">Define the topic and learning competency. Set how many questions to generate per topic.</p>
           <span class="step-tag">Next.js UI</span>
         </div>
       </div>
@@ -587,7 +587,7 @@
         <div class="step-num">2</div>
         <div class="step-body">
           <p class="step-title">Retrieve evidence</p>
-          <p class="step-desc">BM25 sparse retrieval combines with MedCPT dense reranking to pull the most relevant passages from PubMed articles and medical textbooks. Falls back to live PubMed Web API when the local corpus returns no results.</p>
+          <p class="step-desc">BM25 sparse retrieval combines with dense reranking to pull the most relevant passages from your knowledge base. Falls back to live PubMed Web API when enabled and the local corpus returns no results.</p>
           <span class="step-tag">BM25 + MedCPT Hybrid</span>
         </div>
       </div>
@@ -799,7 +799,7 @@
         <div class="tech-badge badge-purple">ML</div>
         <div>
           <p class="tech-name">MedCPT</p>
-          <p class="tech-role">Dense retrieval · biomedical BERT</p>
+          <p class="tech-role">Dense retrieval · embedding model</p>
         </div>
       </div>
       <div class="tech-card">
@@ -820,7 +820,7 @@
         <div class="tech-badge badge-rose">DATA</div>
         <div>
           <p class="tech-name">PubMed + HF Datasets</p>
-          <p class="tech-role">Medical corpus · evidence source</p>
+          <p class="tech-role">Knowledge corpus · evidence source</p>
         </div>
       </div>
     </div>
@@ -829,7 +829,7 @@
 
 <!-- ── CTA Banner ── -->
 <section class="cta-banner">
-  <h2 class="cta-title">Ready to generate verified medical MCQs?</h2>
+  <h2 class="cta-title">Ready to generate verified questions?</h2>
   <p class="cta-desc">Clone the repo, set your .env, and run the pipeline locally in minutes.</p>
   <div style="display:flex;justify-content:center;gap:12px;flex-wrap:wrap;">
     <a class="btn-white" href="https://github.com/" target="_blank" rel="noopener">
@@ -844,7 +844,7 @@
 <footer class="footer">
   <div class="footer-inner">
     <div class="footer-brand">
-      <img src="logo.png" alt="MedQGen" style="height:44px;width:auto;" />
+      <img src="logo.png" alt="AQG" style="height:44px;width:auto;" />
       <p class="footer-copy" style="margin-left:4px;">© 2026 · Undergraduate Thesis Project</p>
     </div>
     <div class="footer-links">

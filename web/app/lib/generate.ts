@@ -69,25 +69,25 @@ export type WsEvent =
     }
 
 export type GeneratePayloadItem = {
-  topic: string
-  competency: string
+  kb_id: string
+  keyword: string
   n_questions: number
   language: "en" | "id" | "both"
 }
 
 export const buildGeneratePayload = (
-  topics: Array<{
-    topic: string
-    competency: string
+  kbId: string,
+  sections: Array<{
+    keyword: string
     n_questions: number
   }>,
 ): GeneratePayloadItem[] => {
-  return topics
+  return sections
     .map((item) => ({
-      topic: item.topic.trim(),
-      competency: item.competency.trim(),
+      kb_id: kbId,
+      keyword: item.keyword.trim(),
       n_questions: Math.max(1, Number(item.n_questions) || 1),
       language: "both" as const,
     }))
-    .filter((item) => item.topic && item.competency)
+    .filter((item) => item.kb_id && item.keyword)
 }

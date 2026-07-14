@@ -35,7 +35,7 @@ AnswerKey = Literal["A", "B", "C", "D"]
 
 class QuestionItem(BaseModel):
     topic: str
-    competency: str
+    competency: str = ""
     stem: str
     options: Options
     answer_key: AnswerKey
