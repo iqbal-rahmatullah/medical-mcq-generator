@@ -16,7 +16,6 @@ from app.schemas.response import QuestionItem
 LOGGER = logging.getLogger(__name__)
 
 _ANSWER_RE = re.compile(r"\b([A-D])\b", re.IGNORECASE)
-_TOPIC_TOKEN_RE = re.compile(r"[A-Za-z0-9]+")
 
 
 class VerificationReport(BaseModel):
@@ -42,6 +41,13 @@ class ReviewerClient:
         text = self._llm_client.generate_text(prompt)
         if text is None:
             raise RuntimeError("topic_coverage_empty_response")
+        return _parse_topic_coverage_decision(text)
+
+    def check_topic_relevance(self, topic: str, stem: str) -> Optional[bool]:
+        prompt = _build_topic_relevance_prompt(topic, stem)
+        text = self._llm_client.generate_text(prompt)
+        if text is None:
+            return None
         return _parse_topic_coverage_decision(text)
 
 
@@ -106,16 +112,6 @@ class CrossCoVeReviewer:
         )
 
         return majority_answer
-    
-    def check_topic_coverage(self, topic: str, evidence_text: str) -> bool:
-        """Check topic coverage using first available reviewer."""
-        for reviewer in self._reviewers:
-            try:
-                return reviewer.check_topic_coverage(topic, evidence_text)
-            except Exception:
-                continue
-        return False
-
 
 
 def verify_questions(
@@ -164,63 +160,17 @@ def verify_questions(
             )
         )
         failed_checks.extend(_check_forbidden_option_formats(question, notes))
-        failed_checks.extend(_check_clinical_vignette(question, notes))
 
         if (
             run_reviewer
             and question.status == "OK"
             and not failed_checks
         ):
-            try:
-                evidence_text = render_evidence(
-                    evidence_docs,
-                    max_chars_per_doc=settings.EVIDENCE_MAX_CHARS_PER_DOC,
-                    max_total_chars=settings.EVIDENCE_MAX_TOTAL_CHARS,
+            failed_checks.extend(
+                _check_reviewer_decision(
+                    question, evidence_docs, reviewer, cross_cove_reviewer, notes
                 )
-                
-                # Use Cross-CoVe if enabled and available
-                if settings.COVE_ENABLED and cross_cove_reviewer is not None:
-                    decision = cross_cove_reviewer.cross_verify(question, evidence_text)
-                    reviewer_mode = "cross_cove"
-                elif reviewer is not None:
-                    decision = reviewer.review(question, evidence_text)
-                    reviewer_mode = "single"
-                else:
-                    decision = None
-                    reviewer_mode = "none"
-                
-                if decision is None:
-                    pass
-                elif decision == "INSUFFICIENT":
-                    LOGGER.warning(
-                        "\\nReviewer failed: reason=insufficient mode=%s topic=%s competency=%s answer_key=%s",
-                        reviewer_mode,
-                        question.topic,
-                        question.competency,
-                        question.answer_key,
-                    )
-                    failed_checks.append("reviewer_insufficient")
-                    notes.append(f"reviewer ({reviewer_mode}) returned INSUFFICIENT")
-                elif decision != question.answer_key:
-                    LOGGER.warning(
-                        "\\nReviewer failed: reason=mismatch mode=%s topic=%s competency=%s expected=%s got=%s",
-                        reviewer_mode,
-                        question.topic,
-                        question.competency,
-                        question.answer_key,
-                        decision,
-                    )
-                    failed_checks.append("reviewer_mismatch")
-                    notes.append(f"reviewer ({reviewer_mode})={decision} expected={question.answer_key}")
-            except Exception as exc:
-                LOGGER.warning(
-                    "\\nReviewer error: topic=%s competency=%s error=%s",
-                    question.topic,
-                    question.competency,
-                    exc,
-                )
-                failed_checks.append("reviewer_error")
-                notes.append(str(exc))
+            )
 
         report = VerificationReport(
             **{"pass": len(failed_checks) == 0, "failed_checks": failed_checks, "notes": notes}
@@ -247,6 +197,67 @@ def verify_questions(
     return results
 
 
+def _check_reviewer_decision(
+    question: QuestionItem,
+    evidence_docs: List[Document],
+    reviewer: Optional[ReviewerClient],
+    cross_cove_reviewer: Optional[CrossCoVeReviewer],
+    notes: List[str],
+) -> List[str]:
+    failed_checks: List[str] = []
+    try:
+        evidence_text = render_evidence(
+            evidence_docs,
+            max_chars_per_doc=settings.EVIDENCE_MAX_CHARS_PER_DOC,
+            max_total_chars=settings.EVIDENCE_MAX_TOTAL_CHARS,
+        )
+
+        # Use Cross-CoVe if enabled and available
+        if settings.COVE_ENABLED and cross_cove_reviewer is not None:
+            decision = cross_cove_reviewer.cross_verify(question, evidence_text)
+            reviewer_mode = "cross_cove"
+        elif reviewer is not None:
+            decision = reviewer.review(question, evidence_text)
+            reviewer_mode = "single"
+        else:
+            decision = None
+            reviewer_mode = "none"
+
+        if decision is None:
+            pass
+        elif decision == "INSUFFICIENT":
+            LOGGER.warning(
+                "\\nReviewer failed: reason=insufficient mode=%s topic=%s competency=%s answer_key=%s",
+                reviewer_mode,
+                question.topic,
+                question.competency,
+                question.answer_key,
+            )
+            failed_checks.append("reviewer_insufficient")
+            notes.append(f"reviewer ({reviewer_mode}) returned INSUFFICIENT")
+        elif decision != question.answer_key:
+            LOGGER.warning(
+                "\\nReviewer failed: reason=mismatch mode=%s topic=%s competency=%s expected=%s got=%s",
+                reviewer_mode,
+                question.topic,
+                question.competency,
+                question.answer_key,
+                decision,
+            )
+            failed_checks.append("reviewer_mismatch")
+            notes.append(f"reviewer ({reviewer_mode})={decision} expected={question.answer_key}")
+    except Exception as exc:
+        LOGGER.warning(
+            "\\nReviewer error: topic=%s competency=%s error=%s",
+            question.topic,
+            question.competency,
+            exc,
+        )
+        failed_checks.append("reviewer_error")
+        notes.append(str(exc))
+    return failed_checks
+
+
 def _check_evidence_spans(
     question: QuestionItem,
     doc_lookup: dict[str, Document],
@@ -260,14 +271,17 @@ def _check_evidence_spans(
         return failed_checks
 
     valid_evidence = []
+    stripped_reasons: set[str] = set()
     for evidence in question.evidence:
         doc = doc_lookup.get(evidence.doc_id)
         if doc is None:
             notes.append(f"stripped missing doc_id: {evidence.doc_id}")
+            stripped_reasons.add("evidence_doc_missing")
             continue
         span_text = _normalize_match_text(evidence.span_text)
         if not span_text:
             notes.append(f"stripped empty span_text for doc_id: {evidence.doc_id}")
+            stripped_reasons.add("evidence_span_empty")
             continue
         doc_text = _normalize_match_text(f"{doc.title} {doc.text}")
         if span_text and span_text in doc_text:
@@ -277,10 +291,11 @@ def _check_evidence_spans(
             valid_evidence.append(evidence)
             continue
         notes.append(f"stripped mismatched span for doc_id: {evidence.doc_id}")
+        stripped_reasons.add("evidence_span_mismatch")
 
     question.evidence = valid_evidence
     if not valid_evidence and question.status == "OK":
-        failed_checks.append("missing_evidence")
+        failed_checks.extend(sorted(stripped_reasons))
 
     return failed_checks
 
@@ -342,11 +357,9 @@ def _check_topic_relevance(
         return []
 
     try:
-        prompt = _build_topic_relevance_prompt(question.topic, question.stem)
-        text = reviewer._llm_client.generate_text(prompt)
-        if text is None:
+        is_relevant = reviewer.check_topic_relevance(question.topic, question.stem)
+        if is_relevant is None:
             return []
-        is_relevant = _parse_topic_coverage_decision(text)
         if not is_relevant:
             LOGGER.warning(
                 "Topic guard FAILED: topic=%s stem=%s",
@@ -431,50 +444,6 @@ def _parse_topic_coverage_decision(text: str) -> bool:
     if "NO" in normalized:
         return False
     return False
-
-
-_DEFINITIONAL_PATTERNS = [
-    re.compile(r"^apa\s+(yang\s+)?(?:dimaksud|definisi|pengertian)", re.I),
-    re.compile(r"^apa\s+(?:itu|adalah)\b", re.I),
-    re.compile(r"bidang studi mana", re.I),
-    re.compile(r"^definisi\s+", re.I),
-    re.compile(r"^what\s+is\s+(?:the\s+)?(?:definition|meaning)\s+of\b", re.I),
-    re.compile(r"^define\s+\w+", re.I),
-    re.compile(r"^which\s+field\s+of\s+(?:study|medicine)", re.I),
-    re.compile(r"^what\s+is\s+\w+\?\s*$", re.I),
-    re.compile(r"^which\s+of\s+the\s+following\s+(?:bacteria|virus|organism|pathogen|drug|medication|antibiotic|enzyme|gene|chromosome)\b", re.I),
-    re.compile(r"^what\s+is\s+the\s+(?:most\s+common\s+)?(?:cause|etiology|pathogen|agent)\s+of\b", re.I),
-    re.compile(r"^what\s+is\s+the\s+(?:primary|recommended|preferred|main|standard)\s+(?:method|treatment|therapy|approach|benefit|goal|purpose)\s+(?:of|for)\b", re.I),
-    re.compile(r"^what\s+is\s+the\s+(?:primary|recommended|preferred|current)\s+(?:understanding|concept|mechanism)\b", re.I),
-    re.compile(r"^what\s+is\s+the\s+recommended\s+concentration\b", re.I),
-    re.compile(r"^which\s+(?:mosquito|vector|organism|bacteria|virus)\s+(?:species|type)\s+is\b", re.I),
-]
-
-
-def _check_clinical_vignette(
-    question: QuestionItem,
-    notes: List[str],
-) -> List[str]:
-    """Block definitional/trivial stems that are not clinical vignettes.
-
-    Medical-domain-specific check; off by default for domain-agnostic
-    knowledge bases (CLINICAL_VIGNETTE_CHECK_ENABLED).
-    """
-    if not settings.CLINICAL_VIGNETTE_CHECK_ENABLED:
-        return []
-    if question.status != "OK":
-        return []
-    stem = question.stem.strip()
-    for pattern in _DEFINITIONAL_PATTERNS:
-        if pattern.search(stem):
-            LOGGER.warning(
-                "Clinical vignette gate FAILED: stem is definitional. topic=%s stem=%s",
-                question.topic,
-                stem[:120],
-            )
-            notes.append("clinical_vignette: stem is definitional, not a clinical question")
-            return ["not_clinical_vignette"]
-    return []
 
 
 _FORBIDDEN_OPTION_PATTERNS = [

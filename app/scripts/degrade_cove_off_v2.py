@@ -1,6 +1,5 @@
 import json
 import random
-import sys
 import os
 
 def degrade_data(input_path, output_path, limit=15):

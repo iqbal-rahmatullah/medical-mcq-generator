@@ -8,16 +8,14 @@ import time
 from typing import Dict, List, Optional
 
 from app.core.config import settings
-from app.corpus.models import Document
 from app.generation.evidence_format import extract_evidence_spans, render_evidence
 from app.generation.llm_client import LLMClient
 from app.generation.prompt_templates import build_prompt
-from app.retrieval.pubmed_web import fetch_pubmed_documents
-from app.retrieval.query_builder import build_query, build_query_minimal, build_query_varied
-from app.retrieval.retriever import RetrievalResult, Retriever
+from app.retrieval.query_builder import build_query, build_query_varied
+from app.retrieval.retriever import Retriever
 from app.schemas.request import GenerateRequestItem
 from app.schemas.response import QuestionItem
-from app.verification.gate import CrossCoVeReviewer, ReviewerClient, VerificationResult, verify_questions
+from app.verification.gate import CrossCoVeReviewer, ReviewerClient, verify_questions
 from app.services._pipeline_utils import (
     _build_failure_question,
     _build_dedupe_instruction,
@@ -55,25 +53,6 @@ _V2_FAILED_CHECKS = {
 }
 _REWRITE_TOKEN_RE = re.compile(r"[A-Za-z0-9]+")
 
-_PUBMED_CACHE: Dict[str, List[Document]] = {}
-
-
-def _fetch_pubmed_fallback(query: str) -> List[Document]:
-    if not settings.PUBMED_WEB_ENABLED:
-        return []
-    if query in _PUBMED_CACHE:
-        LOGGER.info("\nPubMed cache hit: query=%s docs=%s", query[:60], len(_PUBMED_CACHE[query]))
-        return _PUBMED_CACHE[query]
-    result = fetch_pubmed_documents(
-        query,
-        max_results=max(settings.PUBMED_WEB_MAX_RESULTS, 0),
-        api_key=(settings.PUBMED_API_KEY or "").strip() or None,
-        email=(settings.PUBMED_EMAIL or "").strip() or None,
-        timeout_sec=max(settings.PUBMED_WEB_TIMEOUT_SEC, 1.0),
-    )
-    _PUBMED_CACHE[query] = result
-    return result
-
 
 def _rewrite_query(topic: str, competency: str) -> str:
     base = build_query(topic, competency).strip()
@@ -102,9 +81,6 @@ def _generate_single_question(
     query_override: Optional[str] = None
     extra_instructions: Optional[str] = None
     attempt_reason = "initial"
-    override_docs: Optional[List[Document]] = None
-    override_reason: Optional[str] = None
-    override_retrieval_ms = 0.0
     track_doc_ids = used_doc_ids is not None
     doc_id_tracker = used_doc_ids if used_doc_ids is not None else set()
     final_evidence_doc_ids: List[str] = []
@@ -113,12 +89,8 @@ def _generate_single_question(
 
     for attempt in range(1, _MAX_ATTEMPTS + 1):
         query_used = (query_override or "").strip() or build_query(item.topic, item.competency)
-        pubmed_query = build_query_minimal(item.topic, item.competency)
         attempt_reason_used = attempt_reason
         retrieval_mode = settings.RETRIEVAL_MODE
-        web_retrieval_ms = 0.0
-        pubmed_attempted = False
-        pubmed_docs_count = 0
 
         LOGGER.info(
             "\nAttempt start: topic=%s competency=%s attempt=%s reason=%s evidence_top_k=%s query=%s",
@@ -126,66 +98,33 @@ def _generate_single_question(
             _truncate_log(query_used),
         )
 
-        if override_docs is not None:
-            retrieval_mode = "pubmed_web"
-            attempt_reason_used = override_reason or attempt_reason
-            retrieval_result = RetrievalResult(
-                doc_ids=[doc.doc_id for doc in override_docs],
-                evidence_docs=override_docs,
-                bm25_doc_ids=[],
-                dense_doc_ids=[],
-                fused_doc_ids=[doc.doc_id for doc in override_docs],
+        excluded_key = frozenset(doc_id_tracker) if doc_id_tracker else frozenset()
+        cache_key = f"{query_used}|{evidence_top_k}|{excluded_key}"
+        if cache_key in _retrieval_cache:
+            retrieval_result, retrieval_ms = _retrieval_cache[cache_key]
+            retrieval_ms = 0.0
+            LOGGER.info(
+                "\nRetrieval cached: topic=%s competency=%s attempt=%s (skipped ~14s)",
+                item.topic, item.competency, attempt,
             )
-            retrieval_ms = override_retrieval_ms
         else:
-            excluded_key = frozenset(doc_id_tracker) if doc_id_tracker else frozenset()
-            cache_key = f"{query_used}|{evidence_top_k}|{excluded_key}"
-            if cache_key in _retrieval_cache:
-                retrieval_result, retrieval_ms = _retrieval_cache[cache_key]
-                retrieval_ms = 0.0
-                LOGGER.info(
-                    "\nRetrieval cached: topic=%s competency=%s attempt=%s (skipped ~14s)",
-                    item.topic, item.competency, attempt,
-                )
-            else:
-                retrieval_start = time.perf_counter()
-                retrieval_result = retriever.retrieve(
-                    item.topic,
-                    item.competency,
-                    evidence_top_k=evidence_top_k,
-                    query_override=query_override,
-                    exclude_doc_ids=doc_id_tracker if doc_id_tracker else None,
-                )
-                retrieval_ms = (time.perf_counter() - retrieval_start) * 1000.0
-                _retrieval_cache[cache_key] = (retrieval_result, retrieval_ms)
-
-            if not retrieval_result.evidence_docs:
-                web_start = time.perf_counter()
-                pubmed_attempted = True
-                pubmed_docs = _fetch_pubmed_fallback(pubmed_query)
-                web_retrieval_ms = (time.perf_counter() - web_start) * 1000.0
-                retrieval_ms += web_retrieval_ms
-                pubmed_docs_count = len(pubmed_docs)
-                if pubmed_docs:
-                    retrieval_mode = "pubmed_web"
-                    attempt_reason_used = "pubmed_web_fallback"
-                    override_docs = pubmed_docs
-                    override_reason = "pubmed_web_fallback"
-                    override_retrieval_ms = web_retrieval_ms
-                    retrieval_result = RetrievalResult(
-                        doc_ids=[doc.doc_id for doc in pubmed_docs],
-                        evidence_docs=pubmed_docs,
-                        bm25_doc_ids=[],
-                        dense_doc_ids=[],
-                        fused_doc_ids=[doc.doc_id for doc in pubmed_docs],
-                    )
+            retrieval_start = time.perf_counter()
+            retrieval_result = retriever.retrieve(
+                item.topic,
+                item.competency,
+                evidence_top_k=evidence_top_k,
+                query_override=query_override,
+                exclude_doc_ids=doc_id_tracker if doc_id_tracker else None,
+            )
+            retrieval_ms = (time.perf_counter() - retrieval_start) * 1000.0
+            _retrieval_cache[cache_key] = (retrieval_result, retrieval_ms)
 
         LOGGER.info(
-            "\nRetrieval done: topic=%s competency=%s attempt=%s mode=%s ms=%.1f evidence_docs=%s bm25=%s dense=%s fused=%s pubmed_attempted=%s pubmed_docs=%s",
+            "\nRetrieval done: topic=%s competency=%s attempt=%s mode=%s ms=%.1f evidence_docs=%s bm25=%s dense=%s fused=%s",
             item.topic, item.competency, attempt, retrieval_mode, retrieval_ms,
             len(retrieval_result.evidence_docs),
             len(retrieval_result.bm25_doc_ids), len(retrieval_result.dense_doc_ids),
-            len(retrieval_result.fused_doc_ids), pubmed_attempted, pubmed_docs_count,
+            len(retrieval_result.fused_doc_ids),
         )
 
         if not retrieval_result.evidence_docs:
@@ -203,7 +142,6 @@ def _generate_single_question(
                 },
                 "runtime_ms": {"retrieval": retrieval_ms, "llm": 0.0, "verification": 0.0},
                 "retrieval_mode": retrieval_mode,
-                "pubmed_web": {"attempted": pubmed_attempted, "docs": pubmed_docs_count, "runtime_ms": web_retrieval_ms},
                 "status_counts": {"INSUFFICIENT_EVIDENCE": 1},
                 "failed_checks": ["insufficient_evidence"],
             }
@@ -212,7 +150,6 @@ def _generate_single_question(
                 "attempt": attempt, "reason": attempt_reason_used, "query": query_used,
                 "evidence_top_k": evidence_top_k, "retrieval_ms": retrieval_ms,
                 "retrieval_mode": retrieval_mode,
-                "pubmed_web": {"attempted": pubmed_attempted, "docs": pubmed_docs_count, "runtime_ms": web_retrieval_ms},
                 "status_counts": {"INSUFFICIENT_EVIDENCE": 1},
                 "failed_checks": ["insufficient_evidence"],
             })
@@ -356,7 +293,6 @@ def _generate_single_question(
             aggregate_failed_checks, selected_failed_checks,
         )
 
-        _pubmed_log = {"attempted": pubmed_attempted, "docs": pubmed_docs_count, "runtime_ms": web_retrieval_ms}
         attempt_logs.append({
             "attempt": attempt, "reason": attempt_reason_used, "query": query_used,
             "evidence_top_k": evidence_top_k, "candidate_count": candidate_count,
@@ -367,7 +303,7 @@ def _generate_single_question(
                 "fused": retrieval_result.fused_doc_ids,
             },
             "runtime_ms": {"retrieval": retrieval_ms, "llm": llm_ms, "verification": verification_ms},
-            "retrieval_mode": retrieval_mode, "pubmed_web": _pubmed_log,
+            "retrieval_mode": retrieval_mode,
             "status_counts": status_counts, "failed_checks": selected_failed_checks,
             "failed_checks_all": aggregate_failed_checks,
             "evidence_doc_ids_used": evidence_doc_ids, "evidence_reused": evidence_reused,
@@ -378,7 +314,7 @@ def _generate_single_question(
             "selected_index": selected["index"] + 1,
             "retrieval_ms": retrieval_ms, "llm_ms": llm_ms, "verification_ms": verification_ms,
             "extra_instructions": extra_instructions or "",
-            "retrieval_mode": retrieval_mode, "pubmed_web": _pubmed_log,
+            "retrieval_mode": retrieval_mode,
             "status_counts": status_counts, "failed_checks": selected_failed_checks,
             "failed_checks_all": aggregate_failed_checks,
             "evidence_doc_ids_used": evidence_doc_ids, "evidence_reused": evidence_reused,
@@ -390,31 +326,6 @@ def _generate_single_question(
             break
 
         if attempt < _MAX_ATTEMPTS:
-            if (
-                retrieval_mode != "pubmed_web"
-                and (
-                    "topic_coverage" in selected_failed_checks
-                    or question_result.status == "INSUFFICIENT_EVIDENCE"
-                )
-            ):
-                web_start = time.perf_counter()
-                pubmed_attempted = True
-                pubmed_docs = _fetch_pubmed_fallback(pubmed_query)
-                web_retrieval_ms = (time.perf_counter() - web_start) * 1000.0
-                pubmed_docs_count = len(pubmed_docs)
-                _pubmed_now = {"attempted": pubmed_attempted, "docs": pubmed_docs_count, "runtime_ms": web_retrieval_ms}
-                if attempt_logs:
-                    attempt_logs[-1]["pubmed_web"] = _pubmed_now
-                if attempt_history:
-                    attempt_history[-1]["pubmed_web"] = _pubmed_now
-                if pubmed_docs:
-                    override_docs = pubmed_docs
-                    override_reason = "pubmed_web_fallback"
-                    override_retrieval_ms = web_retrieval_ms
-                    attempt_reason = "pubmed_web_fallback"
-                    extra_instructions = None
-                    continue
-
             if question_result.status == "INSUFFICIENT_EVIDENCE" or "missing_evidence" in selected_failed_checks:
                 evidence_top_k = expanded_top_k
                 query_override = _rewrite_query(item.topic, item.competency)

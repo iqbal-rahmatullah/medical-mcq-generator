@@ -7,6 +7,7 @@ import Footer from '../../components/Footer'
 import Navbar from '../../components/Navbar'
 import SectionCard from '../../components/SectionCard'
 import { clearHistory, loadHistory, type HistoryEntry } from '../lib/history'
+import { totalQuestionsInPayload } from '../lib/generate'
 
 export default function HistoryPage() {
   const [entries, setEntries] = useState<HistoryEntry[]>([])
@@ -38,10 +39,7 @@ export default function HistoryPage() {
 
   const historyCards = useMemo(() => {
     return entries.map((entry) => {
-      const totalQuestions = entry.payload.reduce(
-        (sum, item) => sum + Math.max(1, item.n_questions || 1),
-        0
-      )
+      const totalQuestions = totalQuestionsInPayload(entry.payload)
       const createdAt = new Date(entry.created_at)
       const timestamp = Number.isNaN(createdAt.getTime())
         ? entry.created_at

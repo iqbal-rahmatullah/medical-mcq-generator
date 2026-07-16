@@ -181,11 +181,11 @@ def _reattach_evidence_from_cache(
     best_docs.sort(key=lambda x: x[0], reverse=True)
     attached = []
     for score, doc in best_docs[:3]:
-        if score < 0.05:
+        if score < 0.2:
             continue
         text_snippet = (getattr(doc, "text", "") or "")[:500]
         doc_id = getattr(doc, "doc_id", "")
-        source = "pubmed_web" if "pubmed_web" in doc_id else ("pubmed" if "pubmed" in doc_id else "textbook")
+        source = getattr(doc, "source", "") or "knowledge_base"
         attached.append(
             EvidenceItem(
                 source=source,

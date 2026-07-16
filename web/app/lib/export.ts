@@ -21,6 +21,14 @@ function triggerDownload(blob: Blob, filename: string) {
   URL.revokeObjectURL(url)
 }
 
+function truncate(text: string, max: number) {
+  return text.length > max ? `${text.slice(0, max)}…` : text
+}
+
+function formatBadge(r: { topic: string; competency: string }) {
+  return [r.topic, r.competency].filter(Boolean).join(" · ")
+}
+
 export function exportJSON(questions: ApiQuestion[], lang: DisplayLanguage) {
   const exported = questions.map((q, i) => {
     const r = resolveQuestionForDisplay(q, lang)
@@ -133,8 +141,7 @@ export async function exportPDF(
     doc.setFont("helvetica", "normal")
     doc.setFontSize(8)
     doc.setTextColor(80, 80, 120)
-    const badge = [r.topic, r.competency].filter(Boolean).join(" · ")
-    doc.text(badge, MARGIN + 14, y + 5)
+    doc.text(formatBadge(r), MARGIN + 14, y + 5)
     y += 10
 
     // Stem
@@ -188,7 +195,7 @@ export async function exportPDF(
     if (r.evidence.length > 0) {
       writeText("Evidence Sources:", 8, "bold", [100, 100, 140])
       r.evidence.forEach((ev) => {
-        const evText = `• [${ev.doc_id}] ${ev.source}${ev.span_text ? ` — "${ev.span_text.slice(0, 120)}${ev.span_text.length > 120 ? "…" : ""}"` : ""}`
+        const evText = `• [${ev.doc_id}] ${ev.source}${ev.span_text ? ` — "${truncate(ev.span_text, 120)}"` : ""}`
         writeText(evText, 7.5, "normal", [120, 120, 150], 3)
       })
     }
@@ -252,7 +259,7 @@ export async function exportDOCX(
             color: "1450C8",
           }),
           new TextRun({
-            text: [r.topic, r.competency].filter(Boolean).join(" · "),
+            text: formatBadge(r),
             size: 18,
             color: "555577",
           }),
@@ -349,9 +356,7 @@ export async function exportDOCX(
         }),
       )
       r.evidence.forEach((ev) => {
-        const span = ev.span_text
-          ? ` — "${ev.span_text.slice(0, 150)}${ev.span_text.length > 150 ? "…" : ""}"`
-          : ""
+        const span = ev.span_text ? ` — "${truncate(ev.span_text, 150)}"` : ""
         children.push(
           new Paragraph({
             children: [

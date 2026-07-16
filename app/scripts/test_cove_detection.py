@@ -10,10 +10,8 @@ import json
 import logging
 import time
 from dataclasses import dataclass
-from pathlib import Path
 from typing import List, Dict, Any
 
-from app.core.config import settings
 from app.schemas.response import QuestionItem
 from app.services import pipeline
 

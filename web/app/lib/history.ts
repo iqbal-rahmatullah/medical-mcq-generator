@@ -65,10 +65,14 @@ export const saveHistory = (entries: HistoryEntry[]) => {
   if (typeof window === 'undefined') {
     return
   }
-  window.localStorage.setItem(
-    STORAGE_KEY,
-    JSON.stringify(entries.slice(0, MAX_ENTRIES))
-  )
+  try {
+    window.localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify(entries.slice(0, MAX_ENTRIES))
+    )
+  } catch (err) {
+    console.warn('Failed to save history (storage full or unavailable):', err)
+  }
 }
 
 export const appendHistory = (entry: HistoryEntry): HistoryEntry[] => {

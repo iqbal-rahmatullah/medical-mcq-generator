@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useState } from "react"
 import type { MouseEvent } from "react"
 import { useRouter } from "next/navigation"
 
@@ -8,6 +8,8 @@ import FormField from "../components/FormField"
 import Footer from "../components/Footer"
 import Navbar from "../components/Navbar"
 import SectionCard from "../components/SectionCard"
+import { usePolling } from "./hooks/usePolling"
+import { errorMessage } from "./lib/errors"
 import {
   addKnowledgeFiles,
   createKnowledge,
@@ -42,17 +44,13 @@ export default function HomePage() {
   const [editSaving, setEditSaving] = useState(false)
   const [editError, setEditError] = useState("")
 
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
-
   const refresh = async () => {
     try {
       const data = await listKnowledge()
       setKbs(data)
       setError("")
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Failed to load knowledge bases.",
-      )
+      setError(errorMessage(err, "Failed to load knowledge bases."))
     } finally {
       setLoading(false)
     }
@@ -62,20 +60,10 @@ export default function HomePage() {
     refresh()
   }, [])
 
-  useEffect(() => {
-    const hasProcessing = kbs.some((kb) => kb.status === "processing")
-    if (pollRef.current) {
-      clearInterval(pollRef.current)
-      pollRef.current = null
-    }
-    if (hasProcessing) {
-      pollRef.current = setInterval(refresh, 2000)
-    }
-    return () => {
-      if (pollRef.current) clearInterval(pollRef.current)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [kbs])
+  usePolling(
+    kbs.some((kb) => kb.status === "processing"),
+    refresh,
+  )
 
   const handleCardClick = (kb: KnowledgeManifest) => {
     if (kb.status !== "ready") return
@@ -105,9 +93,7 @@ export default function HomePage() {
       setCreateOpen(false)
       await refresh()
     } catch (err) {
-      setCreateError(
-        err instanceof Error ? err.message : "Failed to create knowledge base.",
-      )
+      setCreateError(errorMessage(err, "Failed to create knowledge base."))
     } finally {
       setCreating(false)
     }
@@ -136,7 +122,7 @@ export default function HomePage() {
       setEditingKb(updated)
       await refresh()
     } catch (err) {
-      setEditError(err instanceof Error ? err.message : "Failed to rename.")
+      setEditError(errorMessage(err, "Failed to rename."))
     } finally {
       setEditSaving(false)
     }
@@ -152,7 +138,7 @@ export default function HomePage() {
       setEditAddFiles([])
       await refresh()
     } catch (err) {
-      setEditError(err instanceof Error ? err.message : "Failed to add files.")
+      setEditError(errorMessage(err, "Failed to add files."))
     } finally {
       setEditSaving(false)
     }
@@ -167,9 +153,7 @@ export default function HomePage() {
       setEditingKb(updated)
       await refresh()
     } catch (err) {
-      setEditError(
-        err instanceof Error ? err.message : "Failed to remove file.",
-      )
+      setEditError(errorMessage(err, "Failed to remove file."))
     } finally {
       setEditSaving(false)
     }
@@ -188,9 +172,7 @@ export default function HomePage() {
       await deleteKnowledge(kb.id)
       await refresh()
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Failed to delete knowledge base.",
-      )
+      setError(errorMessage(err, "Failed to delete knowledge base."))
     }
   }
 
@@ -209,7 +191,17 @@ export default function HomePage() {
                   <div
                     key={kb.id}
                     className={`kb-card${kb.status !== "ready" ? " is-disabled" : ""}`}
+                    role='button'
+                    tabIndex={kb.status === "ready" ? 0 : -1}
+                    aria-disabled={kb.status !== "ready"}
                     onClick={() => handleCardClick(kb)}
+                    onKeyDown={(e) => {
+                      if (e.target !== e.currentTarget) return
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault()
+                        handleCardClick(kb)
+                      }
+                    }}
                   >
                     <div className='kb-card-header'>
                       <span className='kb-card-title'>{kb.title}</span>

@@ -4,7 +4,7 @@ import time
 from datetime import datetime, timezone
 from typing import List, Optional
 
-from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from app.logging.logger import get_latest_run_record, get_latest_run_summary
@@ -31,10 +31,26 @@ def health_check() -> HealthResponse:
 
 
 async def _save_upload(dest_dir, upload: UploadFile) -> None:
-    dest = dest_dir / upload.filename
+    safe_name = kb_store.safe_filename(upload.filename)
+    if not safe_name:
+        raise HTTPException(400, "invalid_filename")
+    dest = dest_dir / safe_name
     with dest.open("wb") as out:
         while chunk := await upload.read(_UPLOAD_CHUNK_SIZE):
             out.write(chunk)
+
+
+def _valid_kb_id(kb_id: str) -> str:
+    if not kb_store.is_valid_kb_id(kb_id):
+        raise HTTPException(404, "not_found")
+    return kb_id
+
+
+def _existing_kb(kb_id: str) -> dict:
+    manifest = kb_store.get_kb(kb_id)
+    if manifest is None:
+        raise HTTPException(404, "not_found")
+    return manifest
 
 
 @router.post("/knowledge")
@@ -68,18 +84,13 @@ def list_knowledge() -> List[dict]:
 
 
 @router.get("/knowledge/{kb_id}")
-def get_knowledge(kb_id: str) -> dict:
-    manifest = kb_store.get_kb(kb_id)
-    if manifest is None:
-        raise HTTPException(404, "not_found")
+def get_knowledge(manifest: dict = Depends(_existing_kb)) -> dict:
     return manifest
 
 
 @router.get("/knowledge/{kb_id}/keywords")
-def knowledge_keywords(kb_id: str, limit: int = 20) -> dict:
-    if kb_store.get_kb(kb_id) is None:
-        raise HTTPException(404, "not_found")
-    return {"keywords": kb_store.keyword_stats(kb_id, limit=max(1, min(limit, 100)))}
+def knowledge_keywords(manifest: dict = Depends(_existing_kb), limit: int = 20) -> dict:
+    return {"keywords": kb_store.keyword_stats(manifest["id"], limit=max(1, min(limit, 100)))}
 
 
 class RenameKnowledgeRequest(BaseModel):
@@ -87,7 +98,7 @@ class RenameKnowledgeRequest(BaseModel):
 
 
 @router.patch("/knowledge/{kb_id}")
-def rename_knowledge(kb_id: str, payload: RenameKnowledgeRequest) -> dict:
+def rename_knowledge(payload: RenameKnowledgeRequest, kb_id: str = Depends(_valid_kb_id)) -> dict:
     title = payload.title.strip()
     if not title:
         raise HTTPException(400, "title_required")
@@ -100,12 +111,11 @@ def rename_knowledge(kb_id: str, payload: RenameKnowledgeRequest) -> dict:
 
 @router.post("/knowledge/{kb_id}/files")
 async def add_knowledge_files(
-    kb_id: str,
     background_tasks: BackgroundTasks,
     files: List[UploadFile] = File(...),
+    existing: dict = Depends(_existing_kb),
 ) -> dict:
-    if kb_store.get_kb(kb_id) is None:
-        raise HTTPException(404, "not_found")
+    kb_id = existing["id"]
     files = [f for f in files if f.filename]
     if not files:
         raise HTTPException(400, "files_required")
@@ -120,16 +130,19 @@ async def add_knowledge_files(
 
 
 @router.delete("/knowledge/{kb_id}/files/{filename}")
-def remove_knowledge_file(kb_id: str, filename: str, background_tasks: BackgroundTasks) -> dict:
-    if kb_store.get_kb(kb_id) is None:
-        raise HTTPException(404, "not_found")
+def remove_knowledge_file(
+    filename: str,
+    background_tasks: BackgroundTasks,
+    existing: dict = Depends(_existing_kb),
+) -> dict:
+    kb_id = existing["id"]
     manifest = kb_store.remove_file(kb_id, filename)
     background_tasks.add_task(ingest_kb, kb_id)
     return manifest
 
 
 @router.delete("/knowledge/{kb_id}")
-def delete_knowledge(kb_id: str) -> dict:
+def delete_knowledge(kb_id: str = Depends(_valid_kb_id)) -> dict:
     kb_store.delete_kb(kb_id)
     return {"status": "deleted"}
 
@@ -151,8 +164,9 @@ def generate_questions(payload: List[GenerateRequestItem]) -> List[QuestionItem]
         raise HTTPException(409, not_ready)
     try:
         return run_pipeline_batch(payload)
-    except Exception as exc:
-        return build_failure_batch(payload, f"unhandled_error: {exc}")
+    except Exception:
+        LOGGER.exception("generate_questions: unhandled pipeline error")
+        return build_failure_batch(payload, "unhandled_error")
 
 
 @router.websocket("/ws/generate")
@@ -170,8 +184,9 @@ async def generate_questions_ws(websocket: WebSocket) -> None:
         await websocket.close(code=1003)
         return
     except Exception as exc:
+        LOGGER.exception("WS payload parse error: %s", exc)
         await websocket.send_json(
-            {"type": "error", "message": f"invalid_payload: {exc}"}
+            {"type": "error", "message": "invalid_payload"}
         )
         await websocket.close(code=1003)
         return
@@ -199,9 +214,10 @@ async def generate_questions_ws(websocket: WebSocket) -> None:
             for event in run_pipeline_stream(payload, include_failed=False):
                 loop.call_soon_threadsafe(queue.put_nowait, event)
         except Exception as exc:
+            LOGGER.exception("WS pipeline generator error: %s", exc)
             loop.call_soon_threadsafe(
                 queue.put_nowait,
-                {"type": "error", "message": f"pipeline_error: {exc}"},
+                {"type": "error", "message": "pipeline_error"},
             )
         finally:
             loop.call_soon_threadsafe(queue.put_nowait, _QUEUE_SENTINEL)
@@ -223,7 +239,7 @@ async def generate_questions_ws(websocket: WebSocket) -> None:
     except Exception as exc:
         LOGGER.exception("WebSocket pipeline error: %s", exc)
         try:
-            await websocket.send_json({"type": "error", "message": f"pipeline_error: {exc}"})
+            await websocket.send_json({"type": "error", "message": "pipeline_error"})
         except Exception:
             pass
     finally:

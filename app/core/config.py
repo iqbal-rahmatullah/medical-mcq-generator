@@ -10,7 +10,7 @@ class Settings(BaseSettings):
 
     project_name: str = "AQG"
     environment: str = "local"
-    RETRIEVER_CACHE_PATH: str = ".cache/retriever_cache.pkl"
+    CORS_ALLOW_ORIGINS: str = "http://localhost:3000"
     RETRIEVAL_MODE: str = "bm25_only"
     BM25_CANDIDATES_TOP_N: int = 200
     RERANK_TOP_N: int = 50
@@ -50,7 +50,6 @@ class Settings(BaseSettings):
     QUESTION_BANK_FALLBACK: bool = False
     QUESTION_BANK_WRITE_OK: bool = False
     QUESTION_BANK_ALLOW_ANY_TOPIC: bool = False
-    CLINICAL_VIGNETTE_CHECK_ENABLED: bool = False
 
     # Knowledge base ingestion (domain-agnostic, local-only)
     KNOWLEDGE_DIR: str = "data/knowledge"
@@ -90,19 +89,8 @@ class Settings(BaseSettings):
     REVIEWER_3_API_BASE: str = ""
     REVIEWER_3_MODEL: str = ""
     REVIEWER_3_FALLBACKS: str = ""
-    CORPUS_PUBMED_HF_DATASET: str = "MedRAG/pubmed"
-    CORPUS_TEXTBOOKS_HF_DATASET: str = "MedRAG/textbooks"
-    CORPUS_HF_LOCAL_ONLY: bool = True
-    CORPUS_HF_STREAMING: bool = True
-    CORPUS_PUBMED_MAX_DOCS: int = 2000
-    CORPUS_TEXTBOOKS_MAX_DOCS: int = 0
-    PUBMED_WEB_ENABLED: bool = False
-    PUBMED_WEB_MAX_RESULTS: int = 10
-    PUBMED_WEB_TIMEOUT_SEC: float = 10.0
-    PUBMED_API_KEY: str = ""
-    PUBMED_EMAIL: str = ""
-    NLI_MODEL: str = "pritamdeka/PubMedBERT-MNLI-MedNLI"
-    SEMANTIC_MODEL: str = "microsoft/BiomedNLP-PubMedBERT-base-uncased-abstract-fulltext"
+    NLI_MODEL: str = "MoritzLaurer/mDeBERTa-v3-base-mnli-xnli"
+    SEMANTIC_MODEL: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 
 
 settings = Settings()

@@ -75,7 +75,21 @@ def _kb_root() -> Path:
     return root
 
 
+_KB_ID_RE = re.compile(r"^[0-9a-f]{12}$")
+
+
+def is_valid_kb_id(kb_id: str) -> bool:
+    return bool(_KB_ID_RE.match(kb_id))
+
+
+def safe_filename(name: str) -> Optional[str]:
+    safe = Path(name).name
+    return safe if safe and safe not in (".", "..") else None
+
+
 def _kb_dir(kb_id: str) -> Path:
+    if not is_valid_kb_id(kb_id):
+        raise ValueError(f"invalid kb_id: {kb_id}")
     return _kb_root() / kb_id
 
 
@@ -121,6 +135,8 @@ def list_kbs() -> List[dict]:
 
 
 def get_kb(kb_id: str) -> Optional[dict]:
+    if not is_valid_kb_id(kb_id):
+        return None
     path = _manifest_path(kb_id)
     if not path.exists():
         return None
@@ -158,14 +174,18 @@ def create_kb(title: str, filenames: List[str]) -> dict:
     return _write_manifest(kb_id, manifest)
 
 
+def _mark_processing(manifest: dict) -> None:
+    manifest["status"] = "processing"
+    manifest["progress"] = 0.0
+    manifest["error"] = None
+
+
 def add_files(kb_id: str) -> dict:
     manifest = get_kb(kb_id)
     if manifest is None:
         raise FileNotFoundError(kb_id)
     manifest["files"] = list_raw_files(kb_id)
-    manifest["status"] = "processing"
-    manifest["progress"] = 0.0
-    manifest["error"] = None
+    _mark_processing(manifest)
     return _write_manifest(kb_id, manifest)
 
 
@@ -173,13 +193,13 @@ def remove_file(kb_id: str, filename: str) -> dict:
     manifest = get_kb(kb_id)
     if manifest is None:
         raise FileNotFoundError(kb_id)
-    target = raw_dir(kb_id) / filename
-    if target.exists():
-        target.unlink()
+    safe_name = safe_filename(filename)
+    if safe_name:
+        target = raw_dir(kb_id) / safe_name
+        if target.is_file():
+            target.unlink()
     manifest["files"] = list_raw_files(kb_id)
-    manifest["status"] = "processing"
-    manifest["progress"] = 0.0
-    manifest["error"] = None
+    _mark_processing(manifest)
     return _write_manifest(kb_id, manifest)
 
 

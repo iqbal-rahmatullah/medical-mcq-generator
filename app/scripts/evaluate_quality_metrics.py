@@ -7,8 +7,7 @@ Uses the same evaluation logic as the API endpoints.
 import argparse
 import json
 import logging
-from pathlib import Path
-from typing import List, Dict, Any
+from typing import Dict, Any
 
 from app.eval.rouge_eval import evaluate_question_bank
 from app.eval.nli_eval import evaluate_question_bank_nli

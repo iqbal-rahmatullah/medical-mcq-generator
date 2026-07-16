@@ -99,11 +99,38 @@ def build_failure_batch(
     return results
 
 
+def _emit_item_failure(
+    item: GenerateRequestItem,
+    item_index: int,
+    ok_only_mode: bool,
+    item_outputs: List[Dict[str, object]],
+    item_reports: List[object],
+    completed: int,
+    total_questions: int,
+    build_question_event,
+) -> Iterator[Dict[str, object]]:
+    """Yield the error/question_failed/progress events for an item that
+    raised out of the generation loop, and return the updated `completed`
+    count (via `completed = yield from _emit_item_failure(...)`)."""
+    yield {"type": "error", "item_index": item_index, "message": _GENERIC_FAILURE_MESSAGE}
+    for question_index, question in enumerate(
+        build_failure_batch([item], _GENERIC_FAILURE_MESSAGE, status="FAILED_VERIFICATION"), start=1
+    ):
+        item_outputs.append(question.model_dump())
+        item_reports.append(question.meta.verification.get("gate"))
+        if not ok_only_mode:
+            completed += 1
+            event = build_question_event(question, item_index, question_index)
+            if event is not None:
+                yield event
+            yield {"type": "progress", "completed": completed, "total_questions": total_questions}
+    return completed
+
+
 def run_pipeline_stream(
     payload: List[GenerateRequestItem],
     include_failed: bool = True,
 ) -> Iterator[Dict[str, object]]:
-    retriever = _get_retriever(payload[0].kb_id) if payload else None
     llm_client = _get_llm_client()
     reviewer_client = _get_reviewer_client()
     cross_cove_reviewer = _get_cross_cove_reviewer()
@@ -180,6 +207,7 @@ def run_pipeline_stream(
             if item.n_questions < 1:
                 raise ValueError("n_questions must be >= 1")
 
+            retriever = _get_retriever(item.kb_id)
             item_started = time.perf_counter()
             ok_only_deadline = (item_started + ok_only_max_seconds) if ok_only_mode and ok_only_max_seconds > 0 else None
 
@@ -387,6 +415,7 @@ def run_pipeline_stream(
                         and settings.QUESTION_BANK_WRITE_OK
                         and normalized_stem
                         and normalized_stem not in bank_normalized
+                        and not question.meta.verification.get("graceful_fallback")
                     ):
                         append_question_bank(settings.QUESTION_BANK_PATH, question)
                         bank_questions.append(question)
@@ -469,34 +498,16 @@ def run_pipeline_stream(
 
         except ValueError as exc:
             LOGGER.warning("pipeline validation error: %s", exc)
-            msg = _GENERIC_FAILURE_MESSAGE if ok_only_mode else str(exc)
-            yield {"type": "error", "item_index": item_index, "message": msg}
-            for question_index, question in enumerate(
-                build_failure_batch([item], str(exc), status="FAILED_VERIFICATION"), start=1
-            ):
-                item_outputs.append(question.model_dump())
-                item_reports.append(question.meta.verification.get("gate"))
-                if not ok_only_mode:
-                    completed += 1
-                    event = _build_question_event(question, item_index, question_index)
-                    if event is not None:
-                        yield event
-                    yield {"type": "progress", "completed": completed, "total_questions": total_questions}
+            completed = yield from _emit_item_failure(
+                item, item_index, ok_only_mode, item_outputs, item_reports,
+                completed, total_questions, _build_question_event,
+            )
         except Exception as exc:
             LOGGER.exception("pipeline error: %s", exc)
-            msg = _GENERIC_FAILURE_MESSAGE if ok_only_mode else f"pipeline_error: {exc}"
-            yield {"type": "error", "item_index": item_index, "message": msg}
-            for question_index, question in enumerate(
-                build_failure_batch([item], f"pipeline_error: {exc}", status="FAILED_VERIFICATION"), start=1
-            ):
-                item_outputs.append(question.model_dump())
-                item_reports.append(question.meta.verification.get("gate"))
-                if not ok_only_mode:
-                    completed += 1
-                    event = _build_question_event(question, item_index, question_index)
-                    if event is not None:
-                        yield event
-                    yield {"type": "progress", "completed": completed, "total_questions": total_questions}
+            completed = yield from _emit_item_failure(
+                item, item_index, ok_only_mode, item_outputs, item_reports,
+                completed, total_questions, _build_question_event,
+            )
         finally:
             run_log_items.append({
                 "input": item.model_dump(),

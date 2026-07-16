@@ -20,6 +20,18 @@ _CODE_FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL)
 _TRAILING_COMMA_RE = re.compile(r",\s*([}\]])")
 _OLLAMA_DEFAULT_BASE = "http://localhost:11434"
 _RAW_LOG_LIMIT = 4000
+_MCQ_SYSTEM_PROMPT = "You are a helpful multiple-choice question generator."
+
+
+def _chat_messages(prompt: str) -> List[Dict[str, str]]:
+    return [
+        {"role": "system", "content": _MCQ_SYSTEM_PROMPT},
+        {"role": "user", "content": prompt},
+    ]
+
+
+def _parse_stop_sequences(stop: str) -> List[str]:
+    return [s.strip() for s in stop.split(",") if s.strip()]
 
 
 class LLMClient:
@@ -149,14 +161,7 @@ class LLMClient:
                     "LLM request failed: provider=%s model=%s key=%s kind=%s",
                     target.get("provider"),
                     target.get("model"),
-                    _mask_key(
-                        _select_log_key(
-                            target.get("provider"),
-                            target.get("api_key"),
-                            target.get("groq_api_key"),
-                            target.get("cerebras_api_key"),
-                        )
-                    ),
+                    _target_key_display(target),
                     self._last_error_kind or "unknown",
                 )
             if content:
@@ -164,14 +169,7 @@ class LLMClient:
                     "LLM request success: provider=%s model=%s key=%s",
                     target.get("provider"),
                     target.get("model"),
-                    _mask_key(
-                        _select_log_key(
-                            target.get("provider"),
-                            target.get("api_key"),
-                            target.get("groq_api_key"),
-                            target.get("cerebras_api_key"),
-                        )
-                    ),
+                    _target_key_display(target),
                 )
                 self._target_offset = index
                 return content
@@ -184,24 +182,10 @@ class LLMClient:
                     "LLM failed; falling back from provider=%s model=%s key=%s to provider=%s model=%s key=%s",
                     target.get("provider"),
                     target.get("model"),
-                    _mask_key(
-                        _select_log_key(
-                            target.get("provider"),
-                            target.get("api_key"),
-                            target.get("groq_api_key"),
-                            target.get("cerebras_api_key"),
-                        )
-                    ),
+                    _target_key_display(target),
                     next_target.get("provider"),
                     next_target.get("model"),
-                    _mask_key(
-                        _select_log_key(
-                            next_target.get("provider"),
-                            next_target.get("api_key"),
-                            next_target.get("groq_api_key"),
-                            next_target.get("cerebras_api_key"),
-                        )
-                    ),
+                    _target_key_display(next_target),
                 )
         return None
 
@@ -301,16 +285,13 @@ class LLMClient:
             )
             payload: dict[str, Any] = {
                 "model": model,
-                "messages": [
-                    {"role": "system", "content": "You are a helpful multiple-choice question generator."},
-                    {"role": "user", "content": prompt},
-                ],
+                "messages": _chat_messages(prompt),
                 "temperature": self._temperature,
                 "top_p": self._top_p,
                 "max_completion_tokens": self._max_completion_tokens,
             }
             if self._stop:
-                payload["stop"] = [s.strip() for s in self._stop.split(",") if s.strip()]
+                payload["stop"] = _parse_stop_sequences(self._stop)
             response = client.chat.completions.create(**payload)
         except Exception as exc:
             LOGGER.error("LLM request failed: %s", exc)
@@ -383,10 +364,7 @@ class LLMClient:
 
         payload: dict[str, Any] = {
             "model": model,
-            "messages": [
-                {"role": "system", "content": "You are a helpful multiple-choice question generator."},
-                {"role": "user", "content": prompt},
-            ],
+            "messages": _chat_messages(prompt),
             "temperature": self._temperature,
             "top_p": self._top_p,
             "max_completion_tokens": self._max_completion_tokens,
@@ -396,7 +374,7 @@ class LLMClient:
         if self._reasoning_effort:
             payload["reasoning_effort"] = self._reasoning_effort
         if self._stop:
-            payload["stop"] = [s.strip() for s in self._stop.split(",") if s.strip()]
+            payload["stop"] = _parse_stop_sequences(self._stop)
 
         body = json.dumps(payload).encode("utf-8")
         headers = {
@@ -438,7 +416,7 @@ class LLMClient:
         try:
             content = data["choices"][0]["message"]["content"]
             if isinstance(content, str):
-                pass 
+                pass
             elif isinstance(content, dict):
                 LOGGER.debug("LLM content is dict, serializing to JSON string")
                 content = json.dumps(content)
@@ -487,16 +465,13 @@ class LLMClient:
             client = Groq(api_key=resolved_key, max_retries=0)
             payload: dict[str, Any] = {
                 "model": model,
-                "messages": [
-                    {"role": "system", "content": "You are a helpful multiple-choice question generator."},
-                    {"role": "user", "content": prompt},
-                ],
+                "messages": _chat_messages(prompt),
                 "temperature": self._temperature,
                 "top_p": self._top_p,
                 "max_tokens": self._max_completion_tokens,
             }
             if self._stop:
-                payload["stop"] = [s.strip() for s in self._stop.split(",") if s.strip()]
+                payload["stop"] = _parse_stop_sequences(self._stop)
             response = client.chat.completions.create(**payload)
         except Exception as exc:
             LOGGER.error("LLM request failed: %s", exc)
@@ -522,14 +497,11 @@ class LLMClient:
         if self._max_completion_tokens > 0:
             options["num_predict"] = self._max_completion_tokens
         if self._stop:
-            options["stop"] = [s.strip() for s in self._stop.split(",") if s.strip()]
+            options["stop"] = _parse_stop_sequences(self._stop)
 
         payload: dict[str, Any] = {
             "model": model,
-            "messages": [
-                {"role": "system", "content": "You are a helpful multiple-choice question generator."},
-                {"role": "user", "content": prompt},
-            ],
+            "messages": _chat_messages(prompt),
             "stream": False,
             "options": options,
         }
@@ -612,7 +584,6 @@ def _extract_json_block(text: str) -> str:
     if obj_pos == -1 and arr_pos == -1:
         return text
 
-   
     if arr_pos == -1 or (obj_pos != -1 and obj_pos < arr_pos):
         start = obj_pos
         end = text.rfind("}")
@@ -693,6 +664,17 @@ def _select_log_key(
     if normalized in ("cerebras", "cerebras_sdk", "cerebras_cloud"):
         return cerebras_api_key or api_key
     return api_key
+
+
+def _target_key_display(target: Dict[str, Optional[str]]) -> str:
+    return _mask_key(
+        _select_log_key(
+            target.get("provider"),
+            target.get("api_key"),
+            target.get("groq_api_key"),
+            target.get("cerebras_api_key"),
+        )
+    )
 
 
 def _classify_error(exc: Exception) -> str:

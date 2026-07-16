@@ -1,8 +1,17 @@
-import type { ApiQuestion, Options } from "./generate"
+import type { ApiQuestion, EvidenceItem, Options } from "./generate"
 
 export type DisplayLanguage = "en" | "id"
 
 export const QUESTION_OPTION_KEYS = ["A", "B", "C", "D"] as const
+
+export const buildEvidenceItems = (evidence: EvidenceItem[] | undefined) =>
+  (evidence || [])
+    .map((item) => ({
+      docId: item.doc_id || "",
+      source: item.source || "",
+      span: item.span_text || "",
+    }))
+    .filter((item) => item.docId || item.span)
 
 const hasText = (value: string | null | undefined): value is string => {
   return typeof value === "string" && value.trim().length > 0

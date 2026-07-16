@@ -6,7 +6,7 @@ import logging
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import List, Optional
+from typing import List
 
 from app.core.config import settings
 from app.schemas.request import GenerateRequestItem
@@ -20,16 +20,16 @@ logging.basicConfig(
 LOGGER = logging.getLogger(__name__)
 
 TEST_CASES = [
-    {"topic": "Hypertension", "competency": "Diagnosis"},
-    {"topic": "Diabetes Mellitus", "competency": "Treatment"},
-    {"topic": "Myocardial Infarction", "competency": "Etiology"},
-    {"topic": "Pneumonia", "competency": "Diagnosis"},
-    {"topic": "Stroke", "competency": "Pathophysiology"},
-    {"topic": "Heart Failure", "competency": "Pharmacology"},
-    {"topic": "Tuberculosis", "competency": "Prevention"},
-    {"topic": "Atrial Fibrillation", "competency": "Complications"},
-    {"topic": "Depression", "competency": "Pharmacology"},
-    {"topic": "Rheumatoid Arthritis", "competency": "Pathophysiology"},
+    {"topic": "Core concepts", "competency": "Definition"},
+    {"topic": "Core concepts", "competency": "Application"},
+    {"topic": "Key terminology", "competency": "Comparison"},
+    {"topic": "Key terminology", "competency": "Definition"},
+    {"topic": "Main processes", "competency": "Process steps"},
+    {"topic": "Main processes", "competency": "Cause and effect"},
+    {"topic": "Common issues", "competency": "Best practice"},
+    {"topic": "Common issues", "competency": "Common mistakes"},
+    {"topic": "Advanced topics", "competency": "Cause and effect"},
+    {"topic": "Advanced topics", "competency": "Process steps"},
 ]
 
 
@@ -56,10 +56,9 @@ class AblationSummary:
     cove_off_questions: List[QuestionItem] = None
 
 
-def _reset_pipeline() -> None:
+def _reset_pipeline(kb_id: str) -> None:
     """Reset pipeline state between runs."""
-    pipeline._RETRIEVER = None
-    pipeline._RETRIEVER_ERROR = None
+    pipeline.invalidate_retriever_cache(kb_id)
     pipeline._LLM_CLIENT = None
 
 
@@ -119,11 +118,11 @@ def _compute_metrics(questions: List[QuestionItem], mode: str) -> AblationResult
     )
 
 
-def run_with_cove(payload: List[GenerateRequestItem]) -> List[QuestionItem]:
+def run_with_cove(payload: List[GenerateRequestItem], kb_id: str) -> List[QuestionItem]:
     """Run generation with Cross-CoVe enabled, capturing ALL questions (including failed)."""
     LOGGER.info("Running with Cross-CoVe ENABLED...")
-    
-    _reset_pipeline()
+
+    _reset_pipeline(kb_id)
     
     # Disable OK_ONLY_MODE to capture all questions
     original_ok_only = settings.OK_ONLY_MODE
@@ -144,21 +143,21 @@ def run_with_cove(payload: List[GenerateRequestItem]) -> List[QuestionItem]:
         object.__setattr__(settings, 'OK_ONLY_MODE', original_ok_only)
 
 
-def run_without_cove(payload: List[GenerateRequestItem]) -> List[QuestionItem]:
+def run_without_cove(payload: List[GenerateRequestItem], kb_id: str) -> List[QuestionItem]:
     """Run generation with Cross-CoVe disabled, capturing ALL questions."""
     LOGGER.info("Running with Cross-CoVe DISABLED...")
-    
+
     # Monkey-patch both reviewer functions to skip verification entirely
     original_cross_cove = pipeline._get_cross_cove_reviewer
     original_reviewer = pipeline._get_reviewer_client
     original_ok_only = settings.OK_ONLY_MODE
-    
+
     pipeline._get_cross_cove_reviewer = lambda: None
     pipeline._get_reviewer_client = lambda: None
     object.__setattr__(settings, 'OK_ONLY_MODE', False)
-    
+
     try:
-        _reset_pipeline()
+        _reset_pipeline(kb_id)
         results: List[QuestionItem] = []
         for event in pipeline.run_pipeline_stream(payload, include_failed=True):
             if event.get("type") == "question":
@@ -173,34 +172,35 @@ def run_without_cove(payload: List[GenerateRequestItem]) -> List[QuestionItem]:
         pipeline._get_cross_cove_reviewer = original_cross_cove
         pipeline._get_reviewer_client = original_reviewer
         object.__setattr__(settings, 'OK_ONLY_MODE', original_ok_only)
-        _reset_pipeline()  # Reset again to get reviewer back
+        _reset_pipeline(kb_id)  # Reset again to get reviewer back
 
 
-def run_ablation(n_questions_per_topic: int = 5) -> AblationSummary:
+def run_ablation(kb_id: str, n_questions_per_topic: int = 5) -> AblationSummary:
     """Run the full ablation study."""
-    
+
     # Build payload
     payload = [
         GenerateRequestItem(
+            kb_id=kb_id,
             topic=tc["topic"],
             competency=tc["competency"],
             n_questions=n_questions_per_topic,
         )
         for tc in TEST_CASES
     ]
-    
+
     total_expected = len(TEST_CASES) * n_questions_per_topic
     LOGGER.info(f"Running ablation study with {total_expected} questions...")
-    
+
     # Run with CoVe
     start = time.perf_counter()
-    cove_results = run_with_cove(payload)
+    cove_results = run_with_cove(payload, kb_id)
     cove_time = (time.perf_counter() - start) * 1000
     LOGGER.info(f"Cross-CoVe ENABLED: {len(cove_results)} questions in {cove_time:.1f}ms")
-    
+
     # Run without CoVe
     start = time.perf_counter()
-    no_cove_results = run_without_cove(payload)
+    no_cove_results = run_without_cove(payload, kb_id)
     no_cove_time = (time.perf_counter() - start) * 1000
     LOGGER.info(f"Cross-CoVe DISABLED: {len(no_cove_results)} questions in {no_cove_time:.1f}ms")
     
@@ -271,6 +271,13 @@ def print_results(summary: AblationSummary) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Cross-CoVe Ablation Study")
     parser.add_argument(
+        "--kb-id",
+        type=str,
+        required=True,
+        help="Knowledge base id to generate from (see GET /knowledge for ids). "
+        "TEST_CASES topics should match content in this KB.",
+    )
+    parser.add_argument(
         "--n-questions",
         type=int,
         default=5,
@@ -283,8 +290,8 @@ def main() -> None:
         help="Output JSON path",
     )
     args = parser.parse_args()
-    
-    summary = run_ablation(args.n_questions)
+
+    summary = run_ablation(args.kb_id, args.n_questions)
     print_results(summary)
     
     # Save to JSON

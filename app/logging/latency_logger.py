@@ -23,7 +23,7 @@ import time
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 
 LOGGER = logging.getLogger(__name__)
 
@@ -78,6 +78,9 @@ class LatencyTracker:
         self._run_start: float = time.perf_counter()
         self._question_counter = 0
         self._current_question_start: Optional[float] = None
+        self._reset_current()
+
+    def _reset_current(self) -> None:
         self._current_retrieval_ms: float = 0.0
         self._current_llm_ms: float = 0.0
         self._current_verification_ms: float = 0.0
@@ -88,12 +91,7 @@ class LatencyTracker:
     def begin_question(self) -> None:
         """Call when starting generation of a new question."""
         self._current_question_start = time.perf_counter()
-        self._current_retrieval_ms = 0.0
-        self._current_llm_ms = 0.0
-        self._current_verification_ms = 0.0
-        self._current_attempts = 0
-        self._current_retry_triggered = False
-        self._current_retry_reason = ""
+        self._reset_current()
 
     def record_attempt(
         self,

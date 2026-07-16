@@ -1,6 +1,6 @@
-'use client'
+"use client"
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from "react"
 
 import type {
   ApiQuestion,
@@ -8,9 +8,10 @@ import type {
   GeneratorState,
   ProgressState,
   WsEvent,
-} from '../lib/generate'
-import { getWsUrl } from '../lib/config'
-import { appendHistory, createHistoryEntry } from '../lib/history'
+} from "../lib/generate"
+import { totalQuestionsInPayload } from "../lib/generate"
+import { getWsUrl } from "../lib/config"
+import { appendHistory, createHistoryEntry } from "../lib/history"
 
 export const useQuestionGenerator = (): GeneratorState & {
   generate: (payload: GeneratePayloadItem[]) => void
@@ -18,7 +19,7 @@ export const useQuestionGenerator = (): GeneratorState & {
 } => {
   const [results, setResults] = useState<ApiQuestion[]>([])
   const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
+  const [error, setError] = useState("")
   const [progress, setProgress] = useState<ProgressState | null>(null)
   const [failedCount, setFailedCount] = useState(0)
   const socketRef = useRef<WebSocket | null>(null)
@@ -27,7 +28,6 @@ export const useQuestionGenerator = (): GeneratorState & {
     entry: ReturnType<typeof createHistoryEntry>
     stored: boolean
   } | null>(null)
-  const cancelledRef = useRef(false)
 
   useEffect(() => {
     return () => {
@@ -38,7 +38,7 @@ export const useQuestionGenerator = (): GeneratorState & {
   }, [])
 
   const resetState = () => {
-    setError('')
+    setError("")
     setResults([])
     setProgress(null)
     setFailedCount(0)
@@ -47,7 +47,7 @@ export const useQuestionGenerator = (): GeneratorState & {
 
   const finalizeHistory = (storeEmpty: boolean) => {
     const current = historyRef.current
-    if (!current || current.stored || cancelledRef.current) {
+    if (!current || current.stored) {
       return
     }
     if (!storeEmpty && current.entry.results.length === 0) {
@@ -59,30 +59,26 @@ export const useQuestionGenerator = (): GeneratorState & {
 
   const generate = (payload: GeneratePayloadItem[]) => {
     resetState()
-    cancelledRef.current = false
 
     if (!payload.length) {
-      setError('At least one keyword is required.')
+      setError("At least one keyword is required.")
       return
     }
 
     if (socketRef.current) {
-      cancelledRef.current = true
       socketRef.current.close()
     }
 
     runIdRef.current += 1
     const currentRunId = runIdRef.current
-    const totalQuestions = payload.reduce(
-      (sum, item) => sum + Math.max(1, item.n_questions || 1),
-      0
-    )
+    const isCurrentRun = () => currentRunId === runIdRef.current
+    const totalQuestions = totalQuestionsInPayload(payload)
 
     setLoading(true)
     setProgress({ completed: 0, total: totalQuestions })
     historyRef.current = { entry: createHistoryEntry(payload), stored: false }
 
-    const socket = new WebSocket(getWsUrl('/ws/generate'))
+    const socket = new WebSocket(getWsUrl("/ws/generate"))
     socketRef.current = socket
 
     socket.onopen = () => {
@@ -90,58 +86,56 @@ export const useQuestionGenerator = (): GeneratorState & {
     }
 
     socket.onmessage = (event) => {
-      if (currentRunId !== runIdRef.current) {
+      if (!isCurrentRun()) {
         return
       }
 
       let data: WsEvent
       try {
         data = JSON.parse(event.data) as WsEvent
-      } catch (parseError) {
-        setError('Invalid websocket message.')
+      } catch {
+        setError("Invalid websocket message.")
         setLoading(false)
         socket.close()
         return
       }
 
-      if (data.type === 'question') {
-        setResults((prev) => [...prev, data.question])
-        historyRef.current?.entry.results.push(data.question)
-      }
-
-      if (data.type === 'question_failed') {
-        setFailedCount((prev) => prev + 1)
-      }
-
-      if (data.type === 'progress') {
-        setProgress((prev) => {
-          const total = data.total_questions ?? prev?.total ?? totalQuestions
-          const completed = data.completed ?? prev?.completed ?? 0
-          return { completed, total }
-        })
-      }
-
-      if (data.type === 'error') {
-        setError(data.message || 'Websocket error.')
-      }
-
-      if (data.type === 'done') {
-        setLoading(false)
-        finalizeHistory(true)
-        socket.close()
+      switch (data.type) {
+        case "question":
+          setResults((prev) => [...prev, data.question])
+          historyRef.current?.entry.results.push(data.question)
+          break
+        case "question_failed":
+          setFailedCount((prev) => prev + 1)
+          break
+        case "progress":
+          setProgress((prev) => {
+            const total = data.total_questions ?? prev?.total ?? totalQuestions
+            const completed = data.completed ?? prev?.completed ?? 0
+            return { completed, total }
+          })
+          break
+        case "error":
+          setError(data.message || "Websocket error.")
+          break
+        case "done":
+          setLoading(false)
+          finalizeHistory(true)
+          socket.close()
+          break
       }
     }
 
     socket.onerror = () => {
-      if (currentRunId !== runIdRef.current) {
+      if (!isCurrentRun()) {
         return
       }
-      setError('Websocket connection failed.')
+      setError("Websocket connection failed.")
       setLoading(false)
     }
 
     socket.onclose = () => {
-      if (currentRunId !== runIdRef.current) {
+      if (!isCurrentRun()) {
         return
       }
       finalizeHistory(false)
@@ -151,7 +145,6 @@ export const useQuestionGenerator = (): GeneratorState & {
 
   const cancel = () => {
     runIdRef.current += 1
-    cancelledRef.current = true
     if (socketRef.current) {
       socketRef.current.close()
       socketRef.current = null

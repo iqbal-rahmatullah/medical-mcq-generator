@@ -75,6 +75,11 @@ export type GeneratePayloadItem = {
   language: "en" | "id" | "both"
 }
 
+export const totalQuestionsInPayload = (
+  payload: Array<{ n_questions: number }>,
+): number =>
+  payload.reduce((sum, item) => sum + Math.max(1, item.n_questions || 1), 0)
+
 export const buildGeneratePayload = (
   kbId: string,
   sections: Array<{

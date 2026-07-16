@@ -27,14 +27,16 @@ async function parseOrThrow(res: Response): Promise<any> {
   return res.json()
 }
 
+async function request<T>(url: string, init?: RequestInit): Promise<T> {
+  return parseOrThrow(await fetch(url, init))
+}
+
 export async function listKnowledge(): Promise<KnowledgeManifest[]> {
-  const res = await fetch("/api/knowledge", { cache: "no-store" })
-  return parseOrThrow(res)
+  return request("/api/knowledge", { cache: "no-store" })
 }
 
 export async function getKnowledge(kbId: string): Promise<KnowledgeManifest> {
-  const res = await fetch(`/api/knowledge/${kbId}`, { cache: "no-store" })
-  return parseOrThrow(res)
+  return request(`/api/knowledge/${kbId}`, { cache: "no-store" })
 }
 
 export async function createKnowledge(
@@ -44,20 +46,18 @@ export async function createKnowledge(
   const form = new FormData()
   form.append("title", title)
   files.forEach((file) => form.append("files", file))
-  const res = await fetch("/api/knowledge", { method: "POST", body: form })
-  return parseOrThrow(res)
+  return request("/api/knowledge", { method: "POST", body: form })
 }
 
 export async function renameKnowledge(
   kbId: string,
   title: string,
 ): Promise<KnowledgeManifest> {
-  const res = await fetch(`/api/knowledge/${kbId}`, {
+  return request(`/api/knowledge/${kbId}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ title }),
   })
-  return parseOrThrow(res)
 }
 
 export async function addKnowledgeFiles(
@@ -66,27 +66,24 @@ export async function addKnowledgeFiles(
 ): Promise<KnowledgeManifest> {
   const form = new FormData()
   files.forEach((file) => form.append("files", file))
-  const res = await fetch(`/api/knowledge/${kbId}/files`, {
+  return request(`/api/knowledge/${kbId}/files`, {
     method: "POST",
     body: form,
   })
-  return parseOrThrow(res)
 }
 
 export async function removeKnowledgeFile(
   kbId: string,
   filename: string,
 ): Promise<KnowledgeManifest> {
-  const res = await fetch(
+  return request(
     `/api/knowledge/${kbId}/files/${encodeURIComponent(filename)}`,
     { method: "DELETE" },
   )
-  return parseOrThrow(res)
 }
 
 export async function deleteKnowledge(kbId: string): Promise<void> {
-  const res = await fetch(`/api/knowledge/${kbId}`, { method: "DELETE" })
-  await parseOrThrow(res)
+  await request(`/api/knowledge/${kbId}`, { method: "DELETE" })
 }
 
 export type KeywordStat = { word: string; count: number }
@@ -95,9 +92,9 @@ export async function getKeywordStats(
   kbId: string,
   limit = 20,
 ): Promise<KeywordStat[]> {
-  const res = await fetch(`/api/knowledge/${kbId}/keywords?limit=${limit}`, {
-    cache: "no-store",
-  })
-  const data = await parseOrThrow(res)
+  const data = await request<{ keywords?: KeywordStat[] }>(
+    `/api/knowledge/${kbId}/keywords?limit=${limit}`,
+    { cache: "no-store" },
+  )
   return data.keywords || []
 }
