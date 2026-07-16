@@ -50,6 +50,9 @@ def _create_reviewer_from_config(
 
 
 def _get_reviewer_client() -> Optional[ReviewerClient]:
+    if not settings.REVIEWER_ENABLED:
+        return None
+
     provider = (settings.REVIEWER_PROVIDER or settings.LLM_PROVIDER or "").strip().lower()
     model = (settings.REVIEWER_MODEL or settings.LLM_MODEL or "").strip()
     if not model:

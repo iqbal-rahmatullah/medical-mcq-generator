@@ -50,6 +50,7 @@ class Settings(BaseSettings):
     QUESTION_BANK_FALLBACK: bool = True
     QUESTION_BANK_WRITE_OK: bool = True
     QUESTION_BANK_ALLOW_ANY_TOPIC: bool = False
+    REVIEWER_ENABLED: bool = True
     REVIEWER_PROVIDER: str = ""
     REVIEWER_API_KEY: str = ""
     REVIEWER_API_BASE: str = ""

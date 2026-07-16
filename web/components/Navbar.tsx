@@ -19,7 +19,11 @@ export default function Navbar() {
       <div className='navbar-inner'>
         <div className='brand'>
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src='/logo.png' alt='MedQGen' style={{ height: 48, width: 'auto' }} />
+          <img
+            src='/logo.png'
+            alt='MedQGen'
+            style={{ height: 48, width: "auto" }}
+          />
         </div>
 
         <div className='nav-right'>
@@ -36,9 +40,6 @@ export default function Navbar() {
 
           <div className='nav-actions'>
             <Avatar name='Dr. User' />
-            <IconButton ariaLabel='Settings'>
-              <GearIcon />
-            </IconButton>
           </div>
         </div>
       </div>

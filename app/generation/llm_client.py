@@ -401,6 +401,8 @@ class LLMClient:
         body = json.dumps(payload).encode("utf-8")
         headers = {
             "Content-Type": "application/json",
+            "Accept": "application/json",
+            "User-Agent": "AQG/0.1",
             "Authorization": f"Bearer {api_key}",
         }
         request = urllib.request.Request(
